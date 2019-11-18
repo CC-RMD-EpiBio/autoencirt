@@ -24,7 +24,7 @@ class IRTModel(object):
     def __init__(self):
         pass
 
-    def set_dimension(dim):
+    def set_dimension(self, dim):
         self.dimensions = dim
 
     def load_data(self, response_data):
