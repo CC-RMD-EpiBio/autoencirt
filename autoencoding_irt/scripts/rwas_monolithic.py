@@ -1,23 +1,53 @@
 #!/usr/bin/env python3
+import math
+import os
+from os import path, system
+from copy import copy, deepcopy
+
+import numpy as np
+import pandas as pd
+import pandas as pd
+from sklearn.model_selection import KFold
 
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability.python import util as tfp_util
-import numpy as np
-import pandas as pd
-import os
-from os import path, system
-import pandas as pd
-from sklearn.model_selection import KFold
+
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.mcmc.transformed_kernel import (
     make_transform_fn, make_transformed_log_prob, make_log_det_jacobian_fn)
-import math
+from tensorflow_probability.python.experimental.vi.surrogate_posteriors import (
+    build_factored_surrogate_posterior)
+
+from tensorflow.python import tf2
+if not tf2.enabled():
+    import tensorflow.compat.v2 as tf
+    tf.enable_v2_behavior()
+    assert tf2.enabled()
+
 
 tfd = tfp.distributions
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
+
+
+def clip_gradients(fn, clip_value):
+    def wrapper(*args):
+        @tf.custom_gradient
+        def grad_wrapper(*flat_args):
+            with tf.GradientTape() as tape:
+                tape.watch(flat_args)
+                ret = fn(*tf.nest.pack_sequence_as(args, flat_args))
+
+            def grad_fn(*dy):
+                flat_grads = tape.gradient(ret, flat_args, output_gradients=dy)
+                flat_grads = tf.nest.map_structure(lambda g: tf.where(
+                    tf.math.is_finite(g), g, tf.zeros_like(g)), flat_grads)
+                return tf.clip_by_global_norm(flat_grads, clip_value)[0]
+            return ret, grad_fn
+        return grad_wrapper(*tf.nest.flatten(args))
+    return wrapper
 
 
 class IRTModel(object):
@@ -32,6 +62,7 @@ class IRTModel(object):
     calibrated_traits = None
     calibrated_discriminations = None
     calibrated_difficulties = None
+    bijectors = None
 
     def __init__(self):
         pass
@@ -46,10 +77,10 @@ class IRTModel(object):
         self.response_cardinality = int(max(response_data.max())) + 1
         if int(min(response_data.min())) == 1:
             print("Warning: responses do not appear to be from zero")
-        self.calibration_data = response_data
+        self.calibration_data = tf.cast(response_data.to_numpy(), tf.int32)
 
     def create_distributions(self):
-        self.weighted_likelihood = self.joint_prior_distribution()
+        pass
 
     def calibrate(self):
         pass
@@ -73,8 +104,9 @@ class GRModel(IRTModel):
     data = None
     response_type = "polytomous"
 
-    def __init__(self):
+    def __init__(self, auxiliary_parameterization=True):
         super().__init__()
+        self.auxiliary_parameterization = auxiliary_parameterization
 
     def grm_model_prob(self, abilities, discriminations, difficulties):
         if len(difficulties.shape) == 3:
@@ -115,7 +147,7 @@ class GRModel(IRTModel):
             #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
             # \end{align}
             weights = (
-                discriminations 
+                discriminations
                 / tf.reduce_sum(discriminations, axis=1)[:, tf.newaxis, :])
             probs = tf.reduce_sum(
                 probs*weights[:, tf.newaxis, :, :, tf.newaxis], axis=2)
@@ -258,10 +290,8 @@ class GRModel(IRTModel):
             )
 
     def joint_prior_distribution(self):
-
         K = self.response_cardinality
-
-        grm_joint_distribution = tfd.JointDistributionNamed(dict(
+        grm_joint_distribution_dict = dict(
             mu=tfd.Independent(
                 tfd.Normal(
                     loc=tf.zeros((self.dimensions, self.num_items)),
@@ -287,7 +317,7 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=2
             ),  # difficulties0
             discriminations=lambda eta, xi: tfd.Independent(
-                tfd.HalfNormal(scale=eta[..., tf.newaxis, :]*xi),
+                tfd.HalfNormal(scale=tf.sqrt(eta[..., tf.newaxis, :]*xi)),
                 reinterpreted_batch_ndims=2
             ),  # discrimination
             ddifficulties=tfd.Independent(
@@ -320,11 +350,93 @@ class GRModel(IRTModel):
                     validate_args=True),
                 reinterpreted_batch_ndims=2
             )
-        ))
-        return grm_joint_distribution
+        )
+        if self.auxiliary_parameterization:
+            grm_joint_distribution_dict["xi_a"] = tfd.Independent(
+                tfd.InverseGamma(
+                    0.5*tf.ones((self.dimensions, self.num_items)),
+                    tf.ones((self.dimensions, self.num_items))
+                ),
+                reinterpreted_batch_ndims=2
+            )
+            grm_joint_distribution_dict["xi"] = lambda xi_a: tfd.Independent(
+                tfd.InverseGamma(
+                    0.5*tf.ones((self.dimensions, self.num_items)),
+                    1.0/xi_a
+                ),
+                reinterpreted_batch_ndims=2
+            )
+            grm_joint_distribution_dict["eta_a"] = tfd.Independent(
+                tfd.InverseGamma(
+                    0.5*tf.ones((self.num_items)),
+                    tf.ones((self.num_items))
+                ),
+                reinterpreted_batch_ndims=1
+            )
+            grm_joint_distribution_dict["eta"] = lambda eta_a: tfd.Independent(
+                tfd.InverseGamma(
+                    0.5*tf.ones((self.num_items)),
+                    1.0/eta_a
+                ),
+                reinterpreted_batch_ndims=1
+            )
 
-    def calibrate(self):
-        pass
+        return tfd.JointDistributionNamed(grm_joint_distribution_dict)
+
+    def create_distributions(self):
+        self.weighted_likelihood = self.joint_prior_distribution()
+        self.bijectors = {
+            k: tfp.bijectors.Identity() for k in self.weighted_likelihood.parameters['model'].keys()}
+        del self.bijectors['x']
+        self.bijectors['eta'] = tfp.bijectors.Softplus()
+        self.bijectors['xi'] = tfp.bijectors.Softplus()
+        self.bijectors['discriminations'] = tfp.bijectors.Softplus()
+        self.bijectors['ddifficulties'] = tfp.bijectors.Softplus()
+        if self.auxiliary_parameterization:
+            self.bijectors['eta_a'] = tfp.bijectors.Softplus()
+            self.bijectors['xi_a'] = tfp.bijectors.Softplus()
+
+    def calibrate_advi(self):
+        initial_state_dict = self.weighted_likelihood.sample()
+        event_shape = self.weighted_likelihood.event_shape_tensor()
+        del event_shape['x']
+        variable_names = event_shape.keys()
+
+        self.surrogate_posterior = build_factored_surrogate_posterior(
+            event_shape=event_shape,
+            constraining_bijectors=self.bijectors
+        )
+
+        def unormalized_log_prob(**x):
+            x['x'] = self.calibration_data
+            return self.weighted_likelihood.log_prob(x)
+        learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=1e-3,
+            decay_steps=5,
+            decay_rate=0.99,
+            staircase=True)
+        opt = tf.optimizers.Adam(
+            learning_rate=learning_rate,
+            clipvalue=3.)
+
+        @tf.function
+        def run_approximation(num_steps):
+            losses = tfp.vi.fit_surrogate_posterior(
+                target_log_prob_fn=unormalized_log_prob,
+                surrogate_posterior=self.surrogate_posterior,
+                optimizer=opt,
+                num_steps=num_steps,
+                sample_size=5
+            )
+            return(losses)
+
+        for _ in range(100):
+            losses = run_approximation(10)
+            print(losses)
+
+
+    def calibrate_mcmc(self, num_chains=1):
+        initial_state_dict = self.weighted_likelihood.sample(num_chains)
 
     def score(self, responses):
         pass
@@ -354,7 +466,7 @@ def main():
         grm.create_distributions()
         test_sample = grm.weighted_likelihood.sample()
         test_probs = grm.weighted_likelihood.log_prob_parts(test_sample)
-        grm.calibrate()
+        grm.calibrate_advi()
 
 
 if __name__ == "__main__":
