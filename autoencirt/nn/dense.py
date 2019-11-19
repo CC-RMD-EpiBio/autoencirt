@@ -6,24 +6,26 @@ tfd = tfp.distributions
 
 class DenseNetwork(object):
     fn = None
-
+    parameter_tensors = None
+    
     def __init__(self, input_size=None, layer_sizes=None):
         if (input_size is None) or (layer_sizes is None):
             self.fn = lambda x: x
         else:
-            tensors = self.sample_initial_nn_params(input_size, layer_sizes)
-            _ = self.build_network(tensors)
+            self.parameter_tensors = self.sample_initial_nn_params(
+                input_size, layer_sizes)
+            _ = self.build_network()
 
     def dense(self, X, W, b, activation):
         return activation(tf.matmul(X, W) + b)
 
-    def build_network(self, parameter_tensors, activation=tf.nn.selu):
+    def build_network(self, activation=tf.nn.selu):
         @tf.function
         def model(X):
             net = X
             net = tf.cast(net, tf.float32)
-            weights_list = parameter_tensors[::2]
-            biases_list = parameter_tensors[1::2]
+            weights_list = self.parameter_tensors[::2]
+            biases_list = self.parameter_tensors[1::2]
             for (weights, biases) in zip(weights_list, biases_list):
                 net = dense(net, weights, biases, activation)
             return net

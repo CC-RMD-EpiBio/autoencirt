@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from autoencirt.nn.dense import DenseNetwork, DenseHorseshoeNetwork
+from autoencirt.nn import DenseNetwork, DenseHorseshoeNetwork
 
 
 class IRTModel(object):
@@ -54,3 +54,7 @@ class IRTModel(object):
             return
         if hidden_layers is None:
             hidden_layers = [self.num_items*2, self.num_items*2]
+        nn = DenseNetwork(
+            self.num_items,
+            [self.num_items] + hidden_layers + [self.dimensions]
+            )
