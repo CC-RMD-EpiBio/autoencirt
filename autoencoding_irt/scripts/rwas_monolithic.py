@@ -50,6 +50,24 @@ def clip_gradients(fn, clip_value):
     return wrapper
 
 
+def clip_gradients_dict(fn, clip_value):
+    def wrapper(**args):
+        @tf.custom_gradient
+        def grad_wrapper(**flat_args):
+            with tf.GradientTape() as tape:
+                tape.watch(flat_args)
+                ret = fn(**tf.nest.pack_sequence_as(args, flat_args))
+
+            def grad_fn(*dy):
+                flat_grads = tape.gradient(ret, flat_args, output_gradients=dy)
+                flat_grads = tf.nest.map_structure(lambda g: tf.where(
+                    tf.math.is_finite(g), g, tf.zeros_like(g)), flat_grads)
+                return tf.clip_by_global_norm(flat_grads, clip_value)[0]
+            return ret, grad_fn
+        return grad_wrapper(**tf.nest.flatten(args))
+    return wrapper
+
+
 class IRTModel(object):
     response_type = None
     calibration_data = None
@@ -65,6 +83,8 @@ class IRTModel(object):
     calibrated_discriminations_sd = None
     calibrated_difficulties = None
     bijectors = None
+
+    scoring_network = None
 
     def __init__(self):
         pass
@@ -167,131 +187,28 @@ class GRModel(IRTModel):
         difficulties = tf.cumsum(d0, axis=-1)
         return self.grm_model_prob(abilities, discriminations, difficulties)
 
-    """
-    Probabilities for single items
-    discriminations  D (domain) x I (item)
-    difficulties D x I x K - 1
-    abilities Dx1
-    xi (local horseshoe) D x I
-    eta (global horseshoe) I
-    mu (difficulty local) D x I
-    tau (difficulty) D x I x K-2
-
-    """
-
-    @tf.function(autograph=False)
-    def joint_log_prob(responses,
-                       discriminations,
-                       difficulties0,
-                       ddifficulties,
-                       abilities,
-                       xi,
-                       eta,
-                       mu):
-        """[summary]
-
-        Arguments:
-            responses {[type]} -- [description]
-            discriminations {[type]} -- [description]
-            difficulties0 {[type]} -- [description]
-            ddifficulties {[type]} -- [description]
-            abilities {[type]} -- [description]
-            xi {[type]} -- [description]
-            eta {[type]} -- [description]
-            mu {[type]} -- [description]
-
-        Returns:
-            [type] -- [description]
-        """
-        d0 = tf.concat(
-            [difficulties0[..., tf.newaxis], ddifficulties], axis=-1)
-        difficulties = tf.cumsum(d0, axis=-1)
-        return (
-            tf.reduce_sum(
-                log_likelihood(responses,
-                               discriminations,
-                               difficulties,
-                               abilities)
-            )
-            + joint_log_prior(
-                discriminations, difficulties0,
-                ddifficulties, abilities, xi, eta, mu)
-        )
-
-    @tf.function(autograph=False)
-    def log_likelihood(responses, discriminations, difficulties, abilities):
-        rv_responses = tfd.Categorical(
-            self.grm_model_prob(
-                abilities, discriminations, difficulties), validate_args=True)
-        return rv_responses.log_prob(responses)
-
     @tf.function
-    def joint_log_prior(discriminations, difficulties0,
-                        ddifficulties, abilities, xi, eta, mu):
-        if len(mu.shape) == 2:
-            rv_discriminations = tfd.HalfNormal(scale=eta*xi)
-            rv_difficulties0 = tfd.Normal(loc=mu, scale=1.)
-            rv_ddifficulties = tfd.HalfNormal(
-                scale=tf.ones_like(ddifficulties))
-            rv_abilities = tfd.Normal(loc=tf.zeros_like(abilities), scale=1.)
-            rv_eta = tfd.HalfCauchy(loc=tf.zeros_like(eta),
-                                    scale=tf.ones_like(eta))
-            rv_xi = tfd.HalfCauchy(loc=tf.zeros_like(xi),
-                                   scale=tf.ones_like(xi))
-            rv_mu = tfd.Normal(loc=tf.zeros_like(mu), scale=1.)
-
-            return (tf.reduce_sum(rv_discriminations.log_prob(discriminations))
-                    + tf.reduce_sum(rv_difficulties0.log_prob(difficulties0))
-                    + tf.reduce_sum(rv_ddifficulties.log_prob(ddifficulties))
-                    + tf.reduce_sum(rv_abilities.log_prob(abilities))
-                    + tf.reduce_sum(rv_eta.log_prob(eta))
-                    + tf.reduce_sum(rv_xi.log_prob(xi))
-                    + tf.reduce_sum(rv_mu.log_prob(mu)))
-        elif len(mu.shape) == 3:
-            rv_discriminations = tfd.HalfNormal(
-                scale=eta[..., tf.newaxis, :]*xi)
-            rv_difficulties0 = tfd.Normal(loc=mu, scale=1.)
-            rv_ddifficulties = tfd.HalfNormal(
-                scale=tf.ones_like(ddifficulties))
-            rv_abilities = tfd.Normal(loc=tf.zeros_like(abilities), scale=1.)
-            rv_eta = tfd.HalfCauchy(loc=tf.zeros_like(eta),
-                                    scale=tf.ones_like(eta))
-            rv_xi = tfd.HalfCauchy(loc=tf.zeros_like(xi),
-                                   scale=tf.ones_like(xi))
-            rv_mu = tfd.Normal(loc=tf.zeros_like(mu), scale=1.)
-
-            return (
-                tf.reduce_sum(
-                    rv_discriminations.log_prob(discriminations),
-                    axis=list(range(1, (len(discriminations.shape))))
-                )
-                + tf.reduce_sum(
-                    rv_difficulties0.log_prob(difficulties0),
-                    axis=list(range(1, (len(difficulties0.shape))))
-                )
-                + tf.reduce_sum(
-                    rv_ddifficulties.log_prob(ddifficulties),
-                    axis=list(range(1, (len(ddifficulties.shape))))
-                )
-                + tf.reduce_sum(
-                    rv_abilities.log_prob(abilities),
-                    axis=list(range(1, (len(abilities.shape))))
-                )
-                + tf.reduce_sum(
-                    rv_eta.log_prob(eta),
-                    axis=list(range(1, (len(eta.shape))))
-                )
-                + tf.reduce_sum(
-                    rv_xi.log_prob(xi),
-                    axis=list(range(1, (len(xi.shape))))
-                )
-                + tf.reduce_sum(
-                    rv_mu.log_prob(mu),
-                    axis=list(range(1, (len(mu.shape))))
-                )
+    def compute_likelihood_distribution(self, abilities,
+                                discriminations, difficulties0,
+                                ddifficulties):
+        return tfd.Independent(
+                tfd.Categorical(
+                    self.grm_model_prob_d(
+                        abilities,
+                        discriminations,
+                        difficulties0,
+                        ddifficulties
+                    ),
+                    validate_args=True),
+                reinterpreted_batch_ndims=2
             )
 
     def joint_prior_distribution(self):
+        """Joint probability with measure over observations
+        
+        Returns:
+            tf.distributions.JointDistributionNamed -- Joint distribution
+        """
         K = self.response_cardinality
         grm_joint_distribution_dict = dict(
             mu=tfd.Independent(
@@ -386,6 +303,8 @@ class GRModel(IRTModel):
         return tfd.JointDistributionNamed(grm_joint_distribution_dict)
 
     def create_distributions(self):
+        """Create the relevant prior distributions and the surrogate distribution
+        """
         self.weighted_likelihood = self.joint_prior_distribution()
         self.bijectors = {
             k: tfp.bijectors.Identity() for k in self.weighted_likelihood.parameters['model'].keys()}
@@ -408,17 +327,25 @@ class GRModel(IRTModel):
         )
 
     def calibrate_advi(self, num_steps=10):
+        """Approximate the model using ADVI
+        
+        Keyword Arguments:
+            num_steps {int} -- [description] (default: {10})
+        
+        Returns:
+            tf.Tensor -- Loss at each iteration
+        """
         def unormalized_log_prob(**x):
             x['x'] = self.calibration_data
             return self.weighted_likelihood.log_prob(x)
         learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
             initial_learning_rate=1e-1,
             decay_steps=5,
-            decay_rate=0.99,
+            decay_rate=0.98,
             staircase=True)
         opt = tf.optimizers.Adam(
             learning_rate=learning_rate,
-            clipvalue=3.)
+            clipvalue=1.)
 
         @tf.function
         def run_approximation(num_steps):
@@ -427,7 +354,7 @@ class GRModel(IRTModel):
                 surrogate_posterior=self.surrogate_posterior,
                 optimizer=opt,
                 num_steps=num_steps,
-                sample_size=5
+                sample_size=10
             )
             return(losses)
 
@@ -457,12 +384,17 @@ class GRModel(IRTModel):
                 )
             ], axis=-1), axis=-1
         )
+
         return(losses)
 
     def calibrate_mcmc(self, num_chains=1):
         initial_state_dict = self.weighted_likelihood.sample(num_chains)
 
+    def train_scoring_network(self):
+        pass
+
     def score(self, responses):
+        
         pass
 
     def loss(self, responses, scores):
@@ -491,13 +423,10 @@ def main():
         losses = grm.calibrate_advi(10)
         print(losses)
 
-        scores = grm.score(
-            tf.cast(data.iloc[test_index, :].to_numpy(), tf.int32)
-        )
-        prediction_loss = grm.loss(
-            tf.cast(data.iloc[test_index, :].to_numpy(), tf.int32),
-            scores
-        )
+        test_data_tensor = tf.cast(
+            data.iloc[test_index, :].to_numpy(), tf.int32)
+        scores = grm.score(test_data_tensor)
+        prediction_loss = grm.loss(test_data_tensor, scores)
 
 
 if __name__ == "__main__":
