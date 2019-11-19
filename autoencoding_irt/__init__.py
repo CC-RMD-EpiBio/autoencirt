@@ -1,3 +1,3 @@
 from .data import *
-from .response_functions import *
+from .irt import *
 
