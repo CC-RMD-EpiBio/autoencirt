@@ -60,7 +60,9 @@ class IRTModel(object):
     dimensions = 1
     weighted_likelihood = None
     calibrated_traits = None
+    calibrated_traits_sd = None
     calibrated_discriminations = None
+    calibrated_discriminations_sd = None
     calibrated_difficulties = None
     bijectors = None
 
@@ -396,8 +398,6 @@ class GRModel(IRTModel):
             self.bijectors['eta_a'] = tfp.bijectors.Softplus()
             self.bijectors['xi_a'] = tfp.bijectors.Softplus()
 
-    def calibrate_advi(self):
-        initial_state_dict = self.weighted_likelihood.sample()
         event_shape = self.weighted_likelihood.event_shape_tensor()
         del event_shape['x']
         variable_names = event_shape.keys()
@@ -407,11 +407,12 @@ class GRModel(IRTModel):
             constraining_bijectors=self.bijectors
         )
 
+    def calibrate_advi(self, num_steps=10):
         def unormalized_log_prob(**x):
             x['x'] = self.calibration_data
             return self.weighted_likelihood.log_prob(x)
         learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-3,
+            initial_learning_rate=1e-1,
             decay_steps=5,
             decay_rate=0.99,
             staircase=True)
@@ -430,10 +431,33 @@ class GRModel(IRTModel):
             )
             return(losses)
 
-        for _ in range(100):
-            losses = run_approximation(10)
-            print(losses)
+        losses = run_approximation(num_steps)
+        posterior_samples = self.surrogate_posterior.sample(1000)
+        self.calibrated_traits = tf.reduce_mean(
+            posterior_samples['abilities'], axis=0
+            )
+        self.calibrated_traits_sd = tf.math.reduce_std(
+            posterior_samples['abilities'], axis=0
+            )            
+        self.calibrated_discriminations = tf.reduce_mean(
+            posterior_samples['discriminations'], axis=0
+            )
+        self.calibrated_discriminations_sd = tf.math.reduce_std(
+            posterior_samples['discriminations'], axis=0
+            )
 
+        difficulty_samples = None
+        self.calibrated_difficulties = tf.cumsum(
+            tf.concat([
+                tf.reduce_mean(
+                    posterior_samples['difficulties0'], axis=0
+                )[..., tf.newaxis],
+                tf.reduce_mean(
+                    posterior_samples['ddifficulties'], axis=0
+                )
+            ], axis=-1), axis=-1
+        )
+        return(losses)
 
     def calibrate_mcmc(self, num_chains=1):
         initial_state_dict = self.weighted_likelihood.sample(num_chains)
@@ -441,7 +465,7 @@ class GRModel(IRTModel):
     def score(self, responses):
         pass
 
-    def loss(self, responses):
+    def loss(self, responses, scores):
         pass
 
 
@@ -457,16 +481,23 @@ def get_data():
 
 def main():
     data = get_data()
-    kf = KFold(n_splits=2)
+    kf = KFold(n_splits=4)
     kf.get_n_splits(data)
     for train_index, test_index in kf.split(data):
         grm = GRModel()
         grm.load_data(data.iloc[train_index, :])
         grm.set_dimension(2)
         grm.create_distributions()
-        test_sample = grm.weighted_likelihood.sample()
-        test_probs = grm.weighted_likelihood.log_prob_parts(test_sample)
-        grm.calibrate_advi()
+        losses = grm.calibrate_advi(10)
+        print(losses)
+
+        scores = grm.score(
+            tf.cast(data.iloc[test_index, :].to_numpy(), tf.int32)
+        )
+        prediction_loss = grm.loss(
+            tf.cast(data.iloc[test_index, :].to_numpy(), tf.int32),
+            scores
+        )
 
 
 if __name__ == "__main__":
