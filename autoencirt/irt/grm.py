@@ -6,7 +6,7 @@ from tensorflow_probability.python import util as tfp_util
 import numpy as np
 import pandas as pd
 
-from autoencoding_irt.irt.irt import IRTModel
+from autoencirt.irt import IRTModel
 
 import tensorflow as tf
 import tensorflow_probability as tfp

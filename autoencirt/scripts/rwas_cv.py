@@ -10,7 +10,7 @@ import pandas as pd
 from sklearn.model_selection import KFold
 
 import autoencirt
-from autoencirt.irt.grm import GRModel
+from autoencirt.irt import GRModel
 
 import tensorflow as tf
 import tensorflow_probability as tfp

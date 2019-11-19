@@ -20,9 +20,5 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.7',
-    entry_points="""
-        [console_scripts]
-        fitrwas=autoencoder_irt.tools.cli.rwas:main
-    """
+    python_requires='>=3.7'
 )

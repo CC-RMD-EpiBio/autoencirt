@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from autoencoding_irt.nn.dense import DenseNetwork, DenseHorseshoeNetwork
+from autoencirt.nn.dense import DenseNetwork, DenseHorseshoeNetwork
 
 
 class IRTModel(object):
