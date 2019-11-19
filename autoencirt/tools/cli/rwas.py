@@ -6,4 +6,4 @@ import autoencoding_irt
 
 
 def main():
-    response_functions.grm
+    pass

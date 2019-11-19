@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from autoencoding_irt.nn.dense import DenseNetwork, DenseHorseshoeNetwork
 
 
 class IRTModel(object):
@@ -46,3 +47,10 @@ class IRTModel(object):
 
     def loss(self, responses):
         pass
+
+    def obtain_scoring_nn(self, hidden_layers=None):
+        if calibrated_traits is None:
+            print("Please calibrate the IRT model first")
+            return
+        if hidden_layers is None:
+            hidden_layers = [self.num_items*2, self.num_items*2]

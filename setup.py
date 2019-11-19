@@ -13,7 +13,7 @@ setuptools.setup(
     description="",
     long_description="Probabilistically-autoencoded horseshoe-disentangled multidomain item-response theory models",
     long_description_content_type="text/markdown",
-    url="https://github.com/joshchang/autoencoding_irt",
+    url="https://github.com/joshchang/autoencirt",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -21,7 +21,7 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.7',
-    entry_points = """
+    entry_points="""
         [console_scripts]
         fitrwas=autoencoder_irt.tools.cli.rwas:main
     """

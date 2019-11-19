@@ -9,8 +9,8 @@ import pandas as pd
 import pandas as pd
 from sklearn.model_selection import KFold
 
-import autoencoding_irt
-from autoencoding_irt.irt.grm import GRModel
+import autoencirt
+from autoencirt.irt.grm import GRModel
 
 import tensorflow as tf
 import tensorflow_probability as tfp
