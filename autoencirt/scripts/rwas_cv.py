@@ -62,8 +62,13 @@ def main():
         grm.create_distributions()
 
         # Use ADVI to get us close
-        grm.calibrate_advi(10)
-        grm.calibrate_mcmc()
+        grm.calibrate_advi(100)
+
+        # MCMC sample from here
+        grm.calibrate_mcmc(
+            step_size=1e-4,
+            num_steps=100,
+            burnin=50)
 
         test_data_tensor = tf.cast(
             data.iloc[test_index, :].to_numpy(), tf.int32)

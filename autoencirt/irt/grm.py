@@ -221,6 +221,46 @@ class GRModel(IRTModel):
 
         return tfd.JointDistributionNamed(grm_joint_distribution_dict)
 
+    def set_calibration_expectations(self):
+        self.surrogate_sample = self.surrogate_posterior.sample(1000)
+        self.calibrated_traits = tf.reduce_mean(
+            self.surrogate_sample['abilities'], axis=0
+        )
+        self.calibrated_traits_sd = tf.math.reduce_std(
+            self.surrogate_sample['abilities'], axis=0
+        )
+        self.calibrated_discriminations = tf.reduce_mean(
+            self.surrogate_sample['discriminations'], axis=0
+        )
+        self.calibrated_discriminations_sd = tf.math.reduce_std(
+            self.surrogate_sample['discriminations'], axis=0
+        )
+        self.calibrated_difficulties0 = tf.reduce_mean(
+            self.surrogate_sample['difficulties0'], axis=0
+        )
+
+        self.calibrated_ddifficulties = tf.reduce_mean(
+            self.surrogate_sample['ddifficulties'], axis=0
+        )
+        self.calibrated_difficulties = tf.cumsum(
+            tf.concat([
+                self.calibrated_difficulties0[..., tf.newaxis],
+                self.calibrated_ddifficulties
+            ], axis=-1), axis=-1
+        )
+        self.calibrated_likelihood_distribution = tfd.JointDistributionNamed({
+            'x': tfd.Independent(
+                tfd.Categorical(
+                    self.grm_model_prob(
+                        self.calibrated_traits,
+                        self.calibrated_discriminations,
+                        self.calibrated_difficulties
+                    ), validate_args=True
+                ),
+                reinterpreted_batch_ndims=2
+            )
+        })
+
     def create_distributions(self):
         """Create the relevant prior distributions 
         and the surrogate distribution
@@ -252,50 +292,8 @@ class GRModel(IRTModel):
             constraining_bijectors=self.bijectors
         )
 
-        posterior_samples = self.surrogate_posterior.sample(1000)
-        self.calibrated_traits = tf.reduce_mean(
-            posterior_samples['abilities'], axis=0
-        )
-        self.calibrated_traits_sd = tf.math.reduce_std(
-            posterior_samples['abilities'], axis=0
-        )
-        self.calibrated_discriminations = tf.reduce_mean(
-            posterior_samples['discriminations'], axis=0
-        )
-        self.calibrated_discriminations_sd = tf.math.reduce_std(
-            posterior_samples['discriminations'], axis=0
-        )
-        self.calibrated_difficulties0 = tf.reduce_mean(
-            posterior_samples['difficulties0'], axis=0
-        )
+        self.set_calibration_expectations()
 
-        self.calibrated_ddifficulties = tf.reduce_mean(
-            posterior_samples['ddifficulties'], axis=0
-        )
-
-        difficulty_samples = None
-        self.calibrated_difficulties = tf.cumsum(
-            tf.concat([
-                tf.reduce_mean(
-                    posterior_samples['difficulties0'], axis=0
-                )[..., tf.newaxis],
-                tf.reduce_mean(
-                    posterior_samples['ddifficulties'], axis=0
-                )
-            ], axis=-1), axis=-1
-        )
-        self.calibrated_likelihood_distribution = tfd.JointDistributionNamed({
-            'x': tfd.Independent(
-                tfd.Categorical(
-                    self.grm_model_prob(
-                        self.calibrated_traits,
-                        self.calibrated_discriminations,
-                        self.calibrated_difficulties
-                    ), validate_args=True
-                ),
-                reinterpreted_batch_ndims=2
-            )
-        })
 
     @tf.function
     def unormalized_log_prob(self, **x):
@@ -328,47 +326,7 @@ class GRModel(IRTModel):
             return(losses)
 
         losses = run_approximation(num_steps)
-        self.surrogate_samnple = self.surrogate_posterior.sample(1000)
-        self.calibrated_traits = tf.reduce_mean(
-            self.surrogate_samnple['abilities'], axis=0
-        )
-        self.calibrated_traits_sd = tf.math.reduce_std(
-            self.surrogate_samnple['abilities'], axis=0
-        )
-        self.calibrated_discriminations = tf.reduce_mean(
-            self.surrogate_samnple['discriminations'], axis=0
-        )
-        self.calibrated_discriminations_sd = tf.math.reduce_std(
-            self.surrogate_samnple['discriminations'], axis=0
-        )
-
-        self.calibrated_difficulties0 = tf.reduce_mean(
-            self.surrogate_samnple['difficulties0'], axis=0
-        )
-
-        self.calibrated_ddifficulties = tf.reduce_mean(
-            self.surrogate_samnple['ddifficulties'], axis=0
-        )
-
-        difficulty_samples = None
-        self.calibrated_difficulties = tf.cumsum(
-            tf.concat([
-                self.calibrated_difficulties0[..., tf.newaxis],
-                self.calibrated_ddifficulties
-            ], axis=-1), axis=-1
-        )
-        self.calibrated_likelihood_distribution = tfd.JointDistributionNamed({
-            'x': tfd.Independent(
-                tfd.Categorical(
-                    self.grm_model_prob(
-                        self.calibrated_traits,
-                        self.calibrated_discriminations,
-                        self.calibrated_difficulties
-                    ), validate_args=True
-                ),
-                reinterpreted_batch_ndims=2
-            )
-        })
+        self.set_calibration_expectations()
         print(losses)
         return
 
@@ -390,17 +348,24 @@ class GRModel(IRTModel):
         if init_state is None:
             surrogate_expectations = {
                 k: tf.reduce_mean(v, axis=0)
-                for k, v in self.surrogate_samnple.items()}
+                for k, v in self.surrogate_sample.items()}
             init_state = surrogate_expectations
 
+        initial_list = tf.nest.flatten(init_state)
+        bijectors = [self.bijectors[k] for k in sorted(init_state.keys())]
         samples, sampler_stat = run_chain(
-            init_state=tf.nest.flatten(init_state),
+            init_state=initial_list,
             step_size=step_size,
             target_log_prob_fn=self.unormalized_log_prob_list,
-            unconstraining_bijectors=self.bijectors,
+            unconstraining_bijectors=bijectors,
             num_steps=num_steps,
             burnin=burnin
         )
+        self.surrogate_sample = tf.nest.pack_sequence_as(
+            self.surrogate_sample, samples
+            )
+        self.set_calibration_expectations()
+        
         return samples, sampler_stat
 
     def score(self, responses):
