@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from autoencirt.irt import IRTModel
+from autoencirt.tools.tf import clip_gradients_dict
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -35,6 +36,7 @@ class GRModel(IRTModel):
     """
     data = None
     response_type = "polytomous"
+    dimensional_decay = 0.1
 
     def __init__(self, auxiliary_parameterization=True):
         super().__init__()
@@ -99,23 +101,23 @@ class GRModel(IRTModel):
 
     @tf.function
     def compute_likelihood_distribution(self, abilities,
-                                discriminations, difficulties0,
-                                ddifficulties):
+                                        discriminations, difficulties0,
+                                        ddifficulties):
         return tfd.Independent(
-                tfd.Categorical(
-                    self.grm_model_prob_d(
-                        abilities,
-                        discriminations,
-                        difficulties0,
-                        ddifficulties
-                    ),
-                    validate_args=True),
-                reinterpreted_batch_ndims=2
-            )
+            tfd.Categorical(
+                self.grm_model_prob_d(
+                    abilities,
+                    discriminations,
+                    difficulties0,
+                    ddifficulties
+                ),
+                validate_args=True),
+            reinterpreted_batch_ndims=2
+        )
 
     def joint_prior_distribution(self):
         """Joint probability with measure over observations
-        
+
         Returns:
             tf.distributions.JointDistributionNamed -- Joint distribution
         """
@@ -137,7 +139,9 @@ class GRModel(IRTModel):
             xi=tfd.Independent(
                 tfd.HalfCauchy(
                     loc=tf.zeros((self.dimensions, self.num_items)),
-                    scale=1.
+                    scale=(self.dimensional_decay**(
+                        -tf.cast(tf.range(self.dimensions)+2, tf.float32)
+                        ))[..., :, tf.newaxis]
                 ),
                 reinterpreted_batch_ndims=2
             ),  # xi
@@ -184,7 +188,9 @@ class GRModel(IRTModel):
             grm_joint_distribution_dict["xi_a"] = tfd.Independent(
                 tfd.InverseGamma(
                     0.5*tf.ones((self.dimensions, self.num_items)),
-                    tf.ones((self.dimensions, self.num_items))
+                    (self.dimensional_decay**(
+                        -tf.cast(tf.range(self.dimensions)+2, tf.float32)
+                        ))[..., :, tf.newaxis]
                 ),
                 reinterpreted_batch_ndims=2
             )
@@ -213,11 +219,18 @@ class GRModel(IRTModel):
         return tfd.JointDistributionNamed(grm_joint_distribution_dict)
 
     def create_distributions(self):
-        """Create the relevant prior distributions and the surrogate distribution
+        """Create the relevant prior distributions 
+        and the surrogate distribution
         """
         self.weighted_likelihood = self.joint_prior_distribution()
+
         self.bijectors = {
-            k: tfp.bijectors.Identity() for k in self.weighted_likelihood.parameters['model'].keys()}
+            k: tfp.bijectors.Identity()
+            for
+            k
+            in
+            self.weighted_likelihood.parameters['model'].keys()}
+
         del self.bijectors['x']
         self.bijectors['eta'] = tfp.bijectors.Softplus()
         self.bijectors['xi'] = tfp.bijectors.Softplus()
@@ -236,52 +249,19 @@ class GRModel(IRTModel):
             constraining_bijectors=self.bijectors
         )
 
-    def calibrate_advi(self, num_steps=10):
-        """Approximate the model using ADVI
-        
-        Keyword Arguments:
-            num_steps {int} -- [description] (default: {10})
-        
-        Returns:
-            tf.Tensor -- Loss at each iteration
-        """
-        def unormalized_log_prob(**x):
-            x['x'] = self.calibration_data
-            return self.weighted_likelihood.log_prob(x)
-        learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-1,
-            decay_steps=5,
-            decay_rate=0.98,
-            staircase=True)
-        opt = tf.optimizers.Adam(
-            learning_rate=learning_rate,
-            clipvalue=1.)
-
-        @tf.function
-        def run_approximation(num_steps):
-            losses = tfp.vi.fit_surrogate_posterior(
-                target_log_prob_fn=unormalized_log_prob,
-                surrogate_posterior=self.surrogate_posterior,
-                optimizer=opt,
-                num_steps=num_steps,
-                sample_size=10
-            )
-            return(losses)
-
-        losses = run_approximation(num_steps)
         posterior_samples = self.surrogate_posterior.sample(1000)
         self.calibrated_traits = tf.reduce_mean(
             posterior_samples['abilities'], axis=0
-            )
+        )
         self.calibrated_traits_sd = tf.math.reduce_std(
             posterior_samples['abilities'], axis=0
-            )            
+        )
         self.calibrated_discriminations = tf.reduce_mean(
             posterior_samples['discriminations'], axis=0
-            )
+        )
         self.calibrated_discriminations_sd = tf.math.reduce_std(
             posterior_samples['discriminations'], axis=0
-            )
+        )
 
         difficulty_samples = None
         self.calibrated_difficulties = tf.cumsum(
@@ -294,16 +274,106 @@ class GRModel(IRTModel):
                 )
             ], axis=-1), axis=-1
         )
+        self.calibrated_likelihood_distribution = tfd.JointDistributionNamed({
+            'x': tfd.Independent(
+                tfd.Categorical(
+                    self.grm_model_prob(
+                        self.calibrated_traits,
+                        self.calibrated_discriminations,
+                        self.calibrated_difficulties
+                    ), validate_args=True
+                ),
+                reinterpreted_batch_ndims=2
+            )
+        })
 
+    def calibrate_advi(self, num_steps=10):
+        """Approximate the model using ADVI
+
+        Keyword Arguments:
+            num_steps {int} -- [description] (default: {10})
+
+        Returns:
+            tf.Tensor -- Loss at each iteration
+        """
+        @tf.function
+        def unormalized_log_prob(**x):
+            x['x'] = self.calibration_data
+            return self.weighted_likelihood.log_prob(x)
+
+        learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=1e-1,
+            decay_steps=5,
+            decay_rate=0.99,
+            staircase=True)
+        opt = tf.optimizers.Adam(
+            learning_rate=learning_rate,
+            clipvalue=1.)
+
+        @tf.function
+        def run_approximation(num_steps):
+            losses = tfp.vi.fit_surrogate_posterior(
+                target_log_prob_fn=clip_gradients_dict(
+                    unormalized_log_prob, 1.),
+                surrogate_posterior=self.surrogate_posterior,
+                optimizer=opt,
+                num_steps=num_steps,
+                sample_size=10
+            )
+            return(losses)
+
+        losses = run_approximation(num_steps)
+        posterior_samples = self.surrogate_posterior.sample(1000)
+        self.calibrated_traits = tf.reduce_mean(
+            posterior_samples['abilities'], axis=0
+        )
+        self.calibrated_traits_sd = tf.math.reduce_std(
+            posterior_samples['abilities'], axis=0
+        )
+        self.calibrated_discriminations = tf.reduce_mean(
+            posterior_samples['discriminations'], axis=0
+        )
+        self.calibrated_discriminations_sd = tf.math.reduce_std(
+            posterior_samples['discriminations'], axis=0
+        )
+
+        difficulty_samples = None
+        self.calibrated_difficulties = tf.cumsum(
+            tf.concat([
+                tf.reduce_mean(
+                    posterior_samples['difficulties0'], axis=0
+                )[..., tf.newaxis],
+                tf.reduce_mean(
+                    posterior_samples['ddifficulties'], axis=0
+                )
+            ], axis=-1), axis=-1
+        )
+        self.calibrated_likelihood_distribution = tfd.JointDistributionNamed({
+            'x': tfd.Independent(
+                tfd.Categorical(
+                    self.grm_model_prob(
+                        self.calibrated_traits,
+                        self.calibrated_discriminations,
+                        self.calibrated_difficulties
+                    ), validate_args=True
+                ),
+                reinterpreted_batch_ndims=2
+            )
+        })
         return(losses)
 
-    def calibrate_mcmc(self, num_chains=1):
+    def calibrate_mcmc(self, num_chains=1, num_draws=1000, burn_in=500):
+        """Calibrate using HMC/NUTS
+        
+        Keyword Arguments:
+            num_chains {int} -- [description] (default: {1})
+        """
         initial_state_dict = self.weighted_likelihood.sample(num_chains)
 
-    def train_scoring_network(self):
-        pass
+
 
     def score(self, responses):
+        num_people = responses.shape[0]
 
         pass
 

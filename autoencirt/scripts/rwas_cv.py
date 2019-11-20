@@ -9,8 +9,14 @@ import pandas as pd
 import pandas as pd
 from sklearn.model_selection import KFold
 
+from factor_analyzer import (
+    ConfirmatoryFactorAnalyzer,
+    FactorAnalyzer,
+    ModelSpecificationParser)    
+
 import autoencirt
 from autoencirt.irt import GRModel
+
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -61,6 +67,11 @@ def main():
             data.iloc[test_index, :].to_numpy(), tf.int32)
         scores = grm.score(test_data_tensor)
         prediction_loss = grm.loss(test_data_tensor, scores)
+
+        # Do things the traditional way for comparison
+
+        fa = FactorAnalyzer(n_factors=grm.dimensions)
+        fa.fit(data.iloc[train_index, :])
 
 
 if __name__ == "__main__":

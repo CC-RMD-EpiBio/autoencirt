@@ -17,6 +17,7 @@ class IRTModel(object):
     calibrated_discriminations = None
     calibrated_discriminations_sd = None
     calibrated_difficulties = None
+    calibrated_likelihood_distribution = None
     bijectors = None
 
     scoring_network = None
