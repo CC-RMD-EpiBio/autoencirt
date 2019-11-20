@@ -52,7 +52,7 @@ def get_data():
 
 
 def main():
-    data = get_data()
+    data = get_data().iloc[range(1000), :]
     kf = KFold(n_splits=4)
     kf.get_n_splits(data)
     for train_index, test_index in kf.split(data):
@@ -60,8 +60,10 @@ def main():
         grm.load_data(data.iloc[train_index, :])
         grm.set_dimension(2)
         grm.create_distributions()
-        losses = grm.calibrate_advi(10)
-        print(losses)
+
+        # Use ADVI to get us close
+        grm.calibrate_advi(10)
+        grm.calibrate_mcmc()
 
         test_data_tensor = tf.cast(
             data.iloc[test_index, :].to_numpy(), tf.int32)

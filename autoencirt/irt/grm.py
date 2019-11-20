@@ -7,7 +7,10 @@ import numpy as np
 import pandas as pd
 
 from autoencirt.irt import IRTModel
-from autoencirt.tools.tf import clip_gradients_dict
+from autoencirt.tools.tf import (
+    clip_gradients, run_chain
+)
+
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -141,7 +144,7 @@ class GRModel(IRTModel):
                     loc=tf.zeros((self.dimensions, self.num_items)),
                     scale=(self.dimensional_decay**(
                         -tf.cast(tf.range(self.dimensions)+2, tf.float32)
-                        ))[..., :, tf.newaxis]
+                    ))[..., :, tf.newaxis]
                 ),
                 reinterpreted_batch_ndims=2
             ),  # xi
@@ -190,7 +193,7 @@ class GRModel(IRTModel):
                     0.5*tf.ones((self.dimensions, self.num_items)),
                     (self.dimensional_decay**(
                         -tf.cast(tf.range(self.dimensions)+2, tf.float32)
-                        ))[..., :, tf.newaxis]
+                    ))[..., :, tf.newaxis]
                 ),
                 reinterpreted_batch_ndims=2
             )
@@ -262,6 +265,13 @@ class GRModel(IRTModel):
         self.calibrated_discriminations_sd = tf.math.reduce_std(
             posterior_samples['discriminations'], axis=0
         )
+        self.calibrated_difficulties0 = tf.reduce_mean(
+            posterior_samples['difficulties0'], axis=0
+        )
+
+        self.calibrated_ddifficulties = tf.reduce_mean(
+            posterior_samples['ddifficulties'], axis=0
+        )
 
         difficulty_samples = None
         self.calibrated_difficulties = tf.cumsum(
@@ -287,24 +297,19 @@ class GRModel(IRTModel):
             )
         })
 
-    def calibrate_advi(self, num_steps=10):
-        """Approximate the model using ADVI
+    @tf.function
+    def unormalized_log_prob(self, **x):
+        x['x'] = self.calibration_data
+        return self.weighted_likelihood.log_prob(x)
 
-        Keyword Arguments:
-            num_steps {int} -- [description] (default: {10})
-
-        Returns:
-            tf.Tensor -- Loss at each iteration
-        """
-        @tf.function
-        def unormalized_log_prob(**x):
-            x['x'] = self.calibration_data
-            return self.weighted_likelihood.log_prob(x)
+    def calibrate_advi(
+            self, num_steps=10, initial_learning_rate=5e-2,
+            decay_steps=10, decay_rate=0.99):
 
         learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-1,
-            decay_steps=5,
-            decay_rate=0.99,
+            initial_learning_rate=initial_learning_rate,
+            decay_steps=decay_steps,
+            decay_rate=decay_rate,
             staircase=True)
         opt = tf.optimizers.Adam(
             learning_rate=learning_rate,
@@ -313,8 +318,8 @@ class GRModel(IRTModel):
         @tf.function
         def run_approximation(num_steps):
             losses = tfp.vi.fit_surrogate_posterior(
-                target_log_prob_fn=clip_gradients_dict(
-                    unormalized_log_prob, 1.),
+                target_log_prob_fn=clip_gradients(
+                    self.unormalized_log_prob, 10.),
                 surrogate_posterior=self.surrogate_posterior,
                 optimizer=opt,
                 num_steps=num_steps,
@@ -323,29 +328,33 @@ class GRModel(IRTModel):
             return(losses)
 
         losses = run_approximation(num_steps)
-        posterior_samples = self.surrogate_posterior.sample(1000)
+        self.surrogate_samnple = self.surrogate_posterior.sample(1000)
         self.calibrated_traits = tf.reduce_mean(
-            posterior_samples['abilities'], axis=0
+            self.surrogate_samnple['abilities'], axis=0
         )
         self.calibrated_traits_sd = tf.math.reduce_std(
-            posterior_samples['abilities'], axis=0
+            self.surrogate_samnple['abilities'], axis=0
         )
         self.calibrated_discriminations = tf.reduce_mean(
-            posterior_samples['discriminations'], axis=0
+            self.surrogate_samnple['discriminations'], axis=0
         )
         self.calibrated_discriminations_sd = tf.math.reduce_std(
-            posterior_samples['discriminations'], axis=0
+            self.surrogate_samnple['discriminations'], axis=0
+        )
+
+        self.calibrated_difficulties0 = tf.reduce_mean(
+            self.surrogate_samnple['difficulties0'], axis=0
+        )
+
+        self.calibrated_ddifficulties = tf.reduce_mean(
+            self.surrogate_samnple['ddifficulties'], axis=0
         )
 
         difficulty_samples = None
         self.calibrated_difficulties = tf.cumsum(
             tf.concat([
-                tf.reduce_mean(
-                    posterior_samples['difficulties0'], axis=0
-                )[..., tf.newaxis],
-                tf.reduce_mean(
-                    posterior_samples['ddifficulties'], axis=0
-                )
+                self.calibrated_difficulties0[..., tf.newaxis],
+                self.calibrated_ddifficulties
             ], axis=-1), axis=-1
         )
         self.calibrated_likelihood_distribution = tfd.JointDistributionNamed({
@@ -360,17 +369,39 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=2
             )
         })
-        return(losses)
+        print(losses)
+        return
 
-    def calibrate_mcmc(self, num_chains=1, num_draws=1000, burn_in=500):
-        """Calibrate using HMC/NUTS
+    @tf.function
+    def unormalized_log_prob_list(self, *x):
+        return self.unormalized_log_prob(
+            **tf.nest.pack_sequence_as(
+                self.surrogate_sample,
+                x
+            ))
         
+    def calibrate_mcmc(self, init_state=None, step_size=1e-3,
+                       num_steps=1000, burnin=500):
+        """Calibrate using HMC/NUT
+
         Keyword Arguments:
             num_chains {int} -- [description] (default: {1})
         """
-        initial_state_dict = self.weighted_likelihood.sample(num_chains)
+        if init_state is None:
+            surrogate_expectations = {
+                k: tf.reduce_mean(v, axis=0)
+                for k, v in self.surrogate_samnple.items()}
+            init_state = surrogate_expectations
 
-
+        samples, sampler_stat = run_chain(
+            init_state=tf.nest.flatten(init_state),
+            step_size=step_size,
+            target_log_prob_fn=self.unormalized_log_prob_list,
+            unconstraining_bijectors=self.bijectors,
+            num_steps=num_steps,
+            burnin=burnin
+        )
+        return samples, sampler_stat
 
     def score(self, responses):
         num_people = responses.shape[0]
