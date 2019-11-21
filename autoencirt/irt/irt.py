@@ -147,7 +147,7 @@ class IRTModel(object):
         def run_approximation(num_steps):
             losses = tfp.vi.fit_surrogate_posterior(
                 target_log_prob_fn=clip_gradients(
-                    self.unormalized_log_prob, 2.),
+                    self.unormalized_log_prob, 1.),
                 surrogate_posterior=self.surrogate_posterior,
                 optimizer=opt,
                 num_steps=num_steps,
