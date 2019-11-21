@@ -51,7 +51,7 @@ def main():
         grm.create_distributions()
 
         # Use ADVI to get us close
-        grm.calibrate_advi(5, learning_rate=5e-3)
+        grm.calibrate_advi(300)
 
         # MCMC sample from here
         grm.calibrate_mcmc(

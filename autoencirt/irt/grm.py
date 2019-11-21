@@ -10,11 +10,8 @@ from autoencirt.tools.tf import (
     build_trainable_normal_dist
 )
 
-
 import tensorflow as tf
 import tensorflow_probability as tfp
-from tensorflow_probability.python import util as tfp_util
-
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.mcmc.transformed_kernel import (
     make_transform_fn, make_transformed_log_prob, make_log_det_jacobian_fn)
@@ -23,11 +20,12 @@ from tensorflow_probability.python.experimental.vi.surrogate_posteriors import (
 
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
 
-
 tfd = tfp.distributions
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
+
+LogNormal = tfd.LogNormal
 
 
 class GRModel(IRTModel):
@@ -162,11 +160,19 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=2
             ),  # difficulties0
             discriminations=lambda eta, xi: tfd.Independent(
-                tfd.HalfNormal(scale=eta[..., tf.newaxis, :]*xi),
+                tfp.distributions.LogNorrmal(
+                    loc=tf.ones((self.dimensions, self.num_items)),
+                    scale=eta[..., tf.newaxis, :]*xi),
                 reinterpreted_batch_ndims=2
             ),  # discrimination
             ddifficulties=tfd.Independent(
-                tfd.HalfNormal(
+                LogNormal(
+                    loc=0.25*tf.ones(
+                        (self.dimensions,
+                         self.num_items,
+                         self.response_cardinality-2
+                         )
+                    ),
                     scale=tf.ones(
                         (self.dimensions,
                          self.num_items,
