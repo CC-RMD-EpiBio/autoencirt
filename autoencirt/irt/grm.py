@@ -8,7 +8,7 @@ import pandas as pd
 
 from autoencirt.irt import IRTModel
 from autoencirt.tools.tf import (
-    clip_gradients, run_chain
+    clip_gradients, run_chain, LossLearningRateScheduler
 )
 
 
@@ -124,6 +124,9 @@ class GRModel(IRTModel):
             tf.distributions.JointDistributionNamed -- Joint distribution
         """
         K = self.response_cardinality
+        xi_scale = (self.dimensional_decay**(
+                        tf.cast(tf.range(self.dimensions)+2, tf.float32)
+                    ))[..., :, tf.newaxis]
         grm_joint_distribution_dict = dict(
             mu=tfd.Independent(
                 tfd.Normal(
@@ -141,9 +144,7 @@ class GRModel(IRTModel):
             xi=tfd.Independent(
                 tfd.HalfCauchy(
                     loc=tf.zeros((self.dimensions, self.num_items)),
-                    scale=(self.dimensional_decay**(
-                        -tf.cast(tf.range(self.dimensions)+2, tf.float32)
-                    ))[..., :, tf.newaxis]
+                    scale=xi_scale
                 ),
                 reinterpreted_batch_ndims=2
             ),  # xi
@@ -190,9 +191,7 @@ class GRModel(IRTModel):
             grm_joint_distribution_dict["xi_a"] = tfd.Independent(
                 tfd.InverseGamma(
                     0.5*tf.ones((self.dimensions, self.num_items)),
-                    (self.dimensional_decay**(
-                        -tf.cast(tf.range(self.dimensions)+2, tf.float32)
-                    ))[..., :, tf.newaxis]
+                    1.0/tf.math.square(xi_scale)
                 ),
                 reinterpreted_batch_ndims=2
             )
@@ -308,13 +307,13 @@ class GRModel(IRTModel):
                 decay_rate=decay_rate,
                 staircase=True)
         opt = tf.optimizers.Adam(
-            learning_rate=initial_learning_rate)
+            learning_rate=learning_rate)
 
         @tf.function
         def run_approximation(num_steps):
             losses = tfp.vi.fit_surrogate_posterior(
                 target_log_prob_fn=clip_gradients(
-                    self.unormalized_log_prob, 2.),
+                    self.unormalized_log_prob, 1.),
                 surrogate_posterior=self.surrogate_posterior,
                 optimizer=opt,
                 num_steps=num_steps,
