@@ -300,22 +300,21 @@ class GRModel(IRTModel):
 
     def calibrate_advi(
             self, num_steps=10, initial_learning_rate=5e-2,
-            decay_steps=10, decay_rate=0.99):
-
-        learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=initial_learning_rate,
-            decay_steps=decay_steps,
-            decay_rate=decay_rate,
-            staircase=True)
+            decay_rate=0.99, learning_rate=None):
+        if learning_rate is None:
+            learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
+                initial_learning_rate=initial_learning_rate,
+                decay_steps=num_steps,
+                decay_rate=decay_rate,
+                staircase=True)
         opt = tf.optimizers.Adam(
-            learning_rate=learning_rate,
-            clipvalue=1.)
+            learning_rate=initial_learning_rate)
 
         @tf.function
         def run_approximation(num_steps):
             losses = tfp.vi.fit_surrogate_posterior(
                 target_log_prob_fn=clip_gradients(
-                    self.unormalized_log_prob, 10.),
+                    self.unormalized_log_prob, 2.),
                 surrogate_posterior=self.surrogate_posterior,
                 optimizer=opt,
                 num_steps=num_steps,

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import math
-import os
-from os import path, system
+
 from copy import copy, deepcopy
 
 import numpy as np
@@ -16,7 +15,7 @@ from factor_analyzer import (
 
 import autoencirt
 from autoencirt.irt import GRModel
-
+from autoencirt.data.rwa import item_text, get_data
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -41,19 +40,9 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 
 
-def get_data():
-    if not path.exists('RWAS/data.csv'):
-        system("wget https://openpsychometrics.org/_rawdata/RWAS.zip")
-        system("unzip RWAS.zip")
-    data = pd.read_csv('RWAS/data.csv', low_memory=False)
-    item_responses = data.loc[:, map(lambda x: 'Q'+str(x), list(range(1, 23)))]
-    # system("rm -r RWAS")
-    return item_responses
-
-
 def main():
-    data = get_data().iloc[range(1000), :]
-    kf = KFold(n_splits=4)
+    data = get_data().iloc[range(4000), :]
+    kf = KFold(n_splits=10)
     kf.get_n_splits(data)
     for train_index, test_index in kf.split(data):
         grm = GRModel(auxiliary_parameterization=False)
