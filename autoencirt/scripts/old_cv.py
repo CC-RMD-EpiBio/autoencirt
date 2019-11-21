@@ -13,7 +13,6 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import KFold
 
-tfpl = tfp.layers
 tfd = tfp.distributions
 
 tfd = tfp.distributions
@@ -172,11 +171,12 @@ def main():
           "Homosexuals and feminists should be praised for being brave enough to defy \"traditional family values.\"",
           "This country would work a lot better if certain groups of troublemakers would just shut up and accept their group's traditional place in society."]
 
-    results = []
+    
 
-    kf = KFold(n_splits=10)
+    kf = KFold(n_splits=5)
     kf.get_n_splits(full_data)
-    for train_index, test_index in kf.split(data):
+    for j, (train_index, test_index) in enumerate(kf.split(data)):
+        results = []
         item_responses = full_data.iloc[train_index, :]
         N = item_responses.shape[0]
         I = item_responses.shape[1]
@@ -253,15 +253,15 @@ def main():
                     'ddifficulties_': ddifficulties_,
                     'abilities_': abilities_,
                     'kernel_results': kernel_results,
-                    'xi_': xi_,
-                    'eta_': eta_,
-                    'mu_': mu_,
+                    'xi': xi_,
+                    'eta': eta_,
+                    'mu': mu_,
                     'burnin': burnin
                 }
             ]
 
-    with gzip.open("irt_cv_mcmc_results.gz", 'wb') as outfile:
-        pickle.dump([results], outfile)
+        with gzip.open("irt_cv_mcmc_results" + str(j) + ".gz", 'wb') as outfile:
+            pickle.dump([results], outfile)
 
 
 if __name__ == '__main__':

@@ -45,49 +45,31 @@ class GRModel(IRTModel):
         super().__init__()
         self.auxiliary_parameterization = auxiliary_parameterization
 
+    @tf.function
     def grm_model_prob(self, abilities, discriminations, difficulties):
-        if len(difficulties.shape) == 3:
-            offsets = (difficulties[tf.newaxis, :, :, :]
-                       - abilities[:, :, tf.newaxis, tf.newaxis])
-            scaled = offsets*discriminations[tf.newaxis, :, :, tf.newaxis]
-            logits = 1.0/(1+tf.exp(scaled))
-            logits = tf.pad(logits, paddings=(
-                (0, 0), (0, 0), (0, 0), (1, 0)),
-                mode='constant', constant_values=1)
-            logits = tf.pad(logits, paddings=(
-                (0, 0), (0, 0), (0, 0), (0, 1)),
-                mode='constant', constant_values=0)
-            probs = logits[:, :, :, :-1] - logits[:, :, :, 1:]
-            # weight by discrimination
-            # \begin{align}
-            #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
-            # \end{align}
-            weights = (discriminations
-                       / tf.reduce_sum(discriminations, axis=0)[tf.newaxis, :]
-                       )
-            probs = tf.reduce_sum(
-                probs*weights[tf.newaxis, :, :, tf.newaxis], axis=1)
-        else:
-            offsets = (difficulties[:, tf.newaxis, ...]
-                       - abilities[..., tf.newaxis, tf.newaxis])
-            scaled = offsets*discriminations[:, tf.newaxis, :, :, tf.newaxis]
-            logits = 1.0/(1+tf.exp(scaled))
-            logits = tf.pad(logits, paddings=(
-                (0, 0), (0, 0), (0, 0), (0, 0), (1, 0)),
-                mode='constant', constant_values=1)
-            logits = tf.pad(logits, paddings=(
-                (0, 0), (0, 0), (0, 0), (0, 0), (0, 1)),
-                mode='constant', constant_values=0)
-            probs = logits[..., :-1] - logits[..., 1:]
-            # weight by discrimination
-            # \begin{align}
-            #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
-            # \end{align}
-            weights = (
-                discriminations
-                / tf.reduce_sum(discriminations, axis=1)[:, tf.newaxis, :])
-            probs = tf.reduce_sum(
-                probs*weights[:, tf.newaxis, :, :, tf.newaxis], axis=2)
+        offsets = difficulties - abilities  # N x D x I x K-1
+        scaled = offsets*discriminations
+        logits = 1.0/(1+tf.exp(scaled))
+        logits = tf.pad(
+            logits,
+            paddings=(
+                [(0, 0)]*(len(tf.shape(logits)) - 1) + [(1, 0)]),
+            mode='constant',
+            constant_values=1)
+        logits = tf.pad(
+            logits,
+            paddings=(
+                [(0, 0)]*(len(tf.shape(logits)) - 1) + [(0, 1)]),
+            mode='constant', constant_values=0)
+        probs = logits[..., :-1] - logits[..., 1:]
+
+        # weight by discrimination
+        # \begin{align}
+        #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
+        # \end{align}
+        weights = discriminations / \
+            tf.reduce_sum(discriminations, axis=-3)[..., tf.newaxis, :, :]
+        probs = tf.reduce_sum(probs*weights, axis=-3)
         return probs
 
     @tf.function
@@ -98,7 +80,7 @@ class GRModel(IRTModel):
                          ddifficulties
                          ):
         d0 = tf.concat(
-            [difficulties0[..., tf.newaxis], ddifficulties], axis=-1)
+            [difficulties0, ddifficulties], axis=-1)
         difficulties = tf.cumsum(d0, axis=-1)
         return self.grm_model_prob(abilities, discriminations, difficulties)
 
@@ -125,71 +107,75 @@ class GRModel(IRTModel):
             tf.distributions.JointDistributionNamed -- Joint distribution
         """
         K = self.response_cardinality
-        xi_scale = (self.dimensional_decay**(
-            tf.cast(tf.range(self.dimensions), tf.float32)
-        ))[..., :, tf.newaxis]
+        xi_scale = tf.ones((1, self.dimensions, self.num_items, 1))
         difficulties0 = np.sort(
             np.random.normal(
-                size=(self.dimensions,
+                size=(1, self.dimensions,
                       self.num_items,
-                      self.response_cardinality-1)), axis=2)
-        abilities0 = np.random.normal(size=(self.num_people, self.dimensions))
+                      self.response_cardinality-1)
+            ),
+            axis=-1)
+        abilities0 = np.random.normal(
+            size=(self.num_people, self.dimensions, 1, 1))
 
         grm_joint_distribution_dict = dict(
             mu=tfd.Independent(
                 tfd.Normal(
-                    loc=tf.zeros((self.dimensions, self.num_items)),
+                    loc=tf.zeros((1, self.dimensions, self.num_items, 1)),
                     scale=1.
                 ),
-                reinterpreted_batch_ndims=2
+                reinterpreted_batch_ndims=4
             ),  # mu
             eta=tfd.Independent(
                 tfd.HalfCauchy(
-                    loc=tf.zeros((self.num_items)), scale=.1
+                    loc=tf.zeros((1, 1, self.num_items, 1)), scale=.1
                 ),
-                reinterpreted_batch_ndims=1
+                reinterpreted_batch_ndims=4
             ),  # eta
             xi=tfd.Independent(
                 tfd.HalfCauchy(
-                    loc=tf.zeros((self.dimensions, self.num_items)),
+                    loc=tf.zeros((1, self.dimensions, self.num_items, 1)),
                     scale=xi_scale
                 ),
-                reinterpreted_batch_ndims=2
+                reinterpreted_batch_ndims=4
             ),  # xi
             difficulties0=lambda mu: tfd.Independent(
                 tfd.Normal(loc=mu, scale=1.),
-                reinterpreted_batch_ndims=2
+                reinterpreted_batch_ndims=4
             ),  # difficulties0
             discriminations=lambda eta, xi: tfd.Independent(
                 tfp.distributions.LogNormal(
                     loc=tf.cast(
-                        self.linear_loadings.T**2, tf.float32),
-                    scale=eta[..., tf.newaxis, :]*xi),
-                reinterpreted_batch_ndims=2
+                        self.linear_loadings.T**2, tf.float32)[
+                            tf.newaxis, ..., tf.newaxis],
+                    scale=eta*xi),
+                reinterpreted_batch_ndims=4
             ),  # discrimination
             ddifficulties=tfd.Independent(
                 LogNormal(
                     loc=0.25*tf.ones(
-                        (self.dimensions,
+                        (1,
+                         self.dimensions,
                          self.num_items,
                          self.response_cardinality-2
                          )
                     ),
                     scale=tf.ones(
-                        (self.dimensions,
+                        (1,
+                         self.dimensions,
                          self.num_items,
                          self.response_cardinality-2
                          )
                     )
                 ),
-                reinterpreted_batch_ndims=3
+                reinterpreted_batch_ndims=4
             ),
             abilities=tfd.Independent(
                 tfd.Normal(
-                    loc=tf.zeros((self.num_people, self.dimensions)),
+                    loc=tf.zeros((self.num_people, self.dimensions, 1, 1)),
                     scale=1.
                 ),
-                reinterpreted_batch_ndims=2
+                reinterpreted_batch_ndims=4
             ),
             x=lambda abilities, discriminations, difficulties0, ddifficulties:
             tfd.Independent(
@@ -207,122 +193,123 @@ class GRModel(IRTModel):
         surrogate_distribution_dict = {
             'abilities': build_trainable_normal_dist(
                 tf.cast(abilities0, tf.float32),
-                1e-2*tf.ones((self.num_people, self.dimensions)),
-                2
+                1e-2*tf.ones((self.num_people, self.dimensions, 1, 1)),
+                4
             ),
             'ddifficulties': self.bijectors['ddifficulties'](
                 build_trainable_normal_dist(
                     tf.cast(
-                        difficulties0[:, :, 1:]-difficulties0[:, :, :-1],
+                        difficulties0[..., 1:]-difficulties0[..., :-1],
                         tf.float32),
                     1e-2*tf.ones(
-                        (self.dimensions,
+                        (1,
+                         self.dimensions,
                          self.num_items,
                          self.response_cardinality-2
                          )),
-                    3
+                    4
                 )
             ),
             'discriminations': self.bijectors['discriminations'](
                 build_trainable_normal_dist(
-                    tf.cast(self.linear_loadings.T**2, tf.float32),
-                    1e-2*tf.ones((self.dimensions, self.num_items)),
-                    2
+                    tf.ones((1, self.dimensions, self.num_items, 1)),
+                    1e-2*tf.ones((1, self.dimensions, self.num_items, 1)),
+                    4
                 )
             ),
             'mu': build_trainable_normal_dist(
-                    tf.ones((self.dimensions, self.num_items)),
-                    1e-2*tf.ones((self.dimensions, self.num_items)),
-                    2
+                tf.ones((1, self.dimensions, self.num_items, 1)),
+                1e-2*tf.ones((1, self.dimensions, self.num_items, 1)),
+                4
             ),
             'eta': self.bijectors['eta'](
                 build_trainable_InverseGamma_dist(
-                    0.5*tf.ones((self.num_items)),
-                    tf.ones((self.num_items)),
-                    1
+                    0.5*tf.ones((1, 1, self.num_items, 1)),
+                    tf.ones((1, 1, self.num_items, 1)),
+                    4
                 )
             ),
             'xi': self.bijectors['xi'](
                 build_trainable_InverseGamma_dist(
-                    0.5*tf.ones((self.dimensions, self.num_items)),
-                    tf.ones((self.dimensions, self.num_items)),
-                    2
+                    0.5*tf.ones((1, self.dimensions, self.num_items, 1)),
+                    tf.ones((1, self.dimensions, self.num_items, 1)),
+                    4
                 )
             ),
             'difficulties0': build_trainable_normal_dist(
-                    tf.ones((self.dimensions, self.num_items)),
-                    1e-2*tf.ones((self.dimensions, self.num_items)),
-                    2
+                tf.ones((1, self.dimensions, self.num_items, 1)),
+                1e-2*tf.ones((1, self.dimensions, self.num_items, 1)),
+                4
             )
         }
 
         if self.auxiliary_parameterization:
             grm_joint_distribution_dict["xi_a"] = tfd.Independent(
                 tfd.InverseGamma(
-                    0.5*tf.ones((self.dimensions, self.num_items)),
+                    0.5*tf.ones((1, self.dimensions, self.num_items, 1)),
                     1.0/tf.math.square(xi_scale)
                 ),
-                reinterpreted_batch_ndims=2
+                reinterpreted_batch_ndims=4
             )
             surrogate_distribution_dict["xi_a"] = self.bijectors['xi_a'](
                 build_trainable_InverseGamma_dist(
-                    0.5*tf.ones((self.dimensions, self.num_items)),
-                    tf.ones((self.dimensions, self.num_items)),
-                    2
+                    0.5*tf.ones((1, self.dimensions, self.num_items, 1)),
+                    tf.ones((1, self.dimensions, self.num_items, 1)),
+                    4
                 )
             )
 
             grm_joint_distribution_dict["xi"] = lambda xi_a: tfd.Independent(
                 tfd.InverseGamma(
-                    0.5*tf.ones((self.dimensions, self.num_items)),
+                    0.5*tf.ones((1, self.dimensions, self.num_items, 1)),
                     1.0/xi_a
                 ),
-                reinterpreted_batch_ndims=2
+                reinterpreted_batch_ndims=4
             )
 
             surrogate_distribution_dict["xi"] = self.bijectors['xi'](
                 build_trainable_InverseGamma_dist(
-                    0.5*tf.ones((self.dimensions, self.num_items)),
-                    tf.ones((self.dimensions, self.num_items)),
-                    2
+                    0.5*tf.ones((1, self.dimensions, self.num_items, 1)),
+                    tf.ones((1, self.dimensions, self.num_items, 1)),
+                    4
                 )
             )
 
             grm_joint_distribution_dict["eta_a"] = tfd.Independent(
                 tfd.InverseGamma(
-                    0.5*tf.ones((self.num_items)),
-                    100*tf.ones((self.num_items))
+                    0.5*tf.ones((1, 1, self.num_items, 1)),
+                    100*tf.ones((1, 1, self.num_items, 1))
                 ),
-                reinterpreted_batch_ndims=1
+                reinterpreted_batch_ndims=4
             )
 
             surrogate_distribution_dict["eta_a"] = self.bijectors['eta_a'](
                 build_trainable_InverseGamma_dist(
-                    0.5*tf.ones((self.num_items)),
-                    tf.ones((self.num_items)),
-                    1
+                    0.5*tf.ones((1, 1, self.num_items, 1)),
+                    tf.ones((1, 1, self.num_items, 1)),
+                    4
                 )
             )
 
             grm_joint_distribution_dict["eta"] = lambda eta_a: tfd.Independent(
                 tfd.InverseGamma(
-                    0.5*tf.ones((self.num_items)),
+                    0.5*tf.ones((1, 1, self.num_items, 1)),
                     1.0/eta_a
                 ),
-                reinterpreted_batch_ndims=1
+                reinterpreted_batch_ndims=4
             )
 
             surrogate_distribution_dict["eta"] = self.bijectors['eta'](
                 build_trainable_InverseGamma_dist(
-                    0.5*tf.ones((self.num_items)),
-                    tf.ones((self.num_items)),
-                    1
+                    0.5*tf.ones((1, 1, self.num_items, 1)),
+                    tf.ones((1, 1, self.num_items, 1)),
+                    4
                 )
             )
 
             grm_joint_distribution_dict["discriminations"] = lambda eta, xi: tfd.Independent(
-                tfd.HalfNormal(scale=tf.sqrt(eta[..., tf.newaxis, :]*xi)),
-                reinterpreted_batch_ndims=2
+                tfd.HalfNormal(scale=tf.sqrt(eta*xi)),
+                reinterpreted_batch_ndims=4
             )
 
         return (tfd.JointDistributionNamed(grm_joint_distribution_dict),
@@ -351,7 +338,7 @@ class GRModel(IRTModel):
         )
         self.calibrated_difficulties = tf.cumsum(
             tf.concat([
-                self.calibrated_difficulties0[..., tf.newaxis],
+                self.calibrated_difficulties0,
                 self.calibrated_ddifficulties
             ], axis=-1), axis=-1
         )
@@ -387,7 +374,7 @@ class GRModel(IRTModel):
         if self.auxiliary_parameterization:
             self.bijectors['eta_a'] = tfp.bijectors.Softplus()
             self.bijectors['xi_a'] = tfp.bijectors.Softplus()
-            
+
         self.weighted_likelihood, self.surrogate_posterior = self.joint_prior_distribution()
 
         event_shape = self.weighted_likelihood.event_shape_tensor()

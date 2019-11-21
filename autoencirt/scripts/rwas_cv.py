@@ -20,8 +20,6 @@ from autoencirt.data.rwa import item_text, get_data
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability.python import util as tfp_util
-
-from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.mcmc.transformed_kernel import (
     make_transform_fn, make_transformed_log_prob, make_log_det_jacobian_fn)
 from tensorflow_probability.python.experimental.vi.surrogate_posteriors import (
