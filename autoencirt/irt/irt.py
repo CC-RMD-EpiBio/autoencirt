@@ -1,6 +1,10 @@
 import tensorflow as tf
 import numpy as np
 from autoencirt.nn import Dense, DenseHorseshoe
+
+from factor_analyzer import (
+    FactorAnalyzer)
+
 import tensorflow_probability as tfp
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
@@ -44,6 +48,10 @@ class IRTModel(object):
         self.num_people = response_data.shape[0]
         self.num_items = response_data.shape[1]
         self.response_cardinality = int(max(response_data.max())) + 1
+        fa = FactorAnalyzer(
+            rotation=None, n_factors=self.dimensions)
+        fa.fit(response_data)
+        self.linear_loadings = fa.loadings_
         if int(min(response_data.min())) == 1:
             print("Warning: responses do not appear to be from zero")
         self.calibration_data = tf.cast(response_data.to_numpy(), tf.int32)
@@ -133,21 +141,22 @@ class IRTModel(object):
 
     def calibrate_advi(
             self, num_steps=10, initial_learning_rate=5e-3,
-            decay_rate=0.99, learning_rate=None):
+            decay_rate=0.99, learning_rate=None,
+            opt=None):
         if learning_rate is None:
             learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
                 initial_learning_rate=initial_learning_rate,
                 decay_steps=num_steps,
                 decay_rate=decay_rate,
                 staircase=True)
-        opt = tf.optimizers.Adam(
-            learning_rate=learning_rate)
+        if opt is None:
+            opt = tf.optimizers.Adam(
+                learning_rate=learning_rate)
 
         @tf.function
         def run_approximation(num_steps):
             losses = tfp.vi.fit_surrogate_posterior(
-                target_log_prob_fn=clip_gradients(
-                    self.unormalized_log_prob, 1.),
+                target_log_prob_fn=self.unormalized_log_prob,
                 surrogate_posterior=self.surrogate_posterior,
                 optimizer=opt,
                 num_steps=num_steps,

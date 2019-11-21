@@ -45,13 +45,13 @@ def main():
     kf = KFold(n_splits=10)
     kf.get_n_splits(data)
     for train_index, test_index in kf.split(data):
-        grm = GRModel(auxiliary_parameterization=True)
-        grm.load_data(data.iloc[train_index, :])
+        grm = GRModel(auxiliary_parameterization=False)
         grm.set_dimension(2)
+        grm.load_data(data.iloc[train_index, :])
         grm.create_distributions()
 
         # Use ADVI to get us close
-        grm.calibrate_advi(300)
+        grm.calibrate_advi(50, initial_learning_rate=1e-2)
 
         # MCMC sample from here
         grm.calibrate_mcmc(

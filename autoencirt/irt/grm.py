@@ -10,6 +10,7 @@ from autoencirt.tools.tf import (
     build_trainable_normal_dist
 )
 
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability.python import util as tfp_util
@@ -160,8 +161,9 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=2
             ),  # difficulties0
             discriminations=lambda eta, xi: tfd.Independent(
-                tfp.distributions.LogNorrmal(
-                    loc=tf.ones((self.dimensions, self.num_items)),
+                tfp.distributions.LogNormal(
+                    loc=tf.cast(
+                        self.linear_loadings.T**2, tf.float32),
                     scale=eta[..., tf.newaxis, :]*xi),
                 reinterpreted_batch_ndims=2
             ),  # discrimination
@@ -223,7 +225,7 @@ class GRModel(IRTModel):
             ),
             'discriminations': self.bijectors['discriminations'](
                 build_trainable_normal_dist(
-                    tf.ones((self.dimensions, self.num_items)),
+                    tf.cast(self.linear_loadings.T**2, tf.float32),
                     1e-2*tf.ones((self.dimensions, self.num_items)),
                     2
                 )
@@ -380,8 +382,8 @@ class GRModel(IRTModel):
 
         self.bijectors['eta'] = tfp.bijectors.Softplus()
         self.bijectors['xi'] = tfp.bijectors.Softplus()
-        self.bijectors['discriminations'] = tfp.bijectors.Softplus()
-        self.bijectors['ddifficulties'] = tfp.bijectors.Softplus()
+        self.bijectors['discriminations'] = tfp.bijectors.Exp()
+        self.bijectors['ddifficulties'] = tfp.bijectors.Exp()
         if self.auxiliary_parameterization:
             self.bijectors['eta_a'] = tfp.bijectors.Softplus()
             self.bijectors['xi_a'] = tfp.bijectors.Softplus()
