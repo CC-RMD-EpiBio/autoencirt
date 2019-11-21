@@ -1,5 +1,19 @@
+from tensorflow_probability.python import util as tfp_util
+from tensorflow_probability.python.internal import prefer_static
+from tensorflow_probability.python.internal import dtype_util
 import tensorflow as tf
 import tensorflow_probability as tfp
+import functools
+from tensorflow_probability.python.experimental.vi.surrogate_posteriors import(
+    build_trainable_location_scale_distribution
+)
+from tensorflow_probability.python.bijectors import softplus as softplus_lib
+
+
+tfd = tfp.distributions
+
+tfd = tfp.distributions
+tfb = tfp.bijectors
 
 
 def clip_gradients(fn, clip_value):
@@ -122,10 +136,10 @@ class LossLearningRateScheduler(tf.keras.callbacks.History):
             loss_diff = target_loss[-int(self.lookback_epochs)
                                     ] - target_loss[-1]
             if loss_diff <= np.abs(
-                                   target_loss[-1]
-                                   ) * (
-                                       self.decay_threshold
-                                       * self.lookback_epochs):
+                target_loss[-1]
+            ) * (
+                self.decay_threshold
+                    * self.lookback_epochs):
 
                 print(' '.join(('Changing learning rate from', str(
                     current_lr), 'to', str(current_lr * self.decay_multiple))))
@@ -148,3 +162,64 @@ class LossLearningRateScheduler(tf.keras.callbacks.History):
             tf.keras.backend.set_value(self.model.optimizer.lr, self.base_lr)
 
         return tf.keras.backend.get_value(self.model.optimizer.lr)
+
+
+def build_trainable_concentration_scale_distribution(initial_concentration,
+                                                     initial_scale,
+                                                     event_ndims,
+                                                     distribution_fn=tfd.InverseGamma,
+                                                     validate_args=False,
+                                                     name=None):
+    """Builds a variational distribution from a location-scale family.
+    Args:
+      initial_concentration: Float `Tensor` initial concentration.
+      initial_scale: Float `Tensor` initial scale.
+      event_ndims: Integer `Tensor` number of event dimensions in `initial_concentration`.
+      distribution_fn: Optional constructor for a `tfd.Distribution` instance
+        in a location-scale family. This should have signature `dist =
+        distribution_fn(loc, scale, validate_args)`.
+        Default value: `tfd.Normal`.
+      validate_args: Python `bool`. Whether to validate input with asserts. This
+        imposes a runtime cost. If `validate_args` is `False`, and the inputs are
+        invalid, correct behavior is not guaranteed.
+        Default value: `False`.
+      name: Python `str` name prefixed to ops created by this function.
+        Default value: `None` (i.e.,
+          'build_trainable_location_scale_distribution').
+    Returns:
+      posterior_dist: A `tfd.Distribution` instance.
+    """
+    with tf.name_scope(
+            name or 'build_trainable_concentration_scale_distribution'):
+        dtype = dtype_util.common_dtype([initial_concentration, initial_scale],
+                                        dtype_hint=tf.float32)
+        initial_concentration = tf.convert_to_tensor(
+            initial_concentration, dtype=dtype)
+        initial_scale = tf.convert_to_tensor(initial_scale, dtype=dtype)
+
+        loc = tfp_util.TransformedVariable(
+            initial_concentration, softplus_lib.Softplus(), name='concentration')
+        scale = tfp_util.TransformedVariable(
+            initial_scale, softplus_lib.Softplus(), name='scale')
+        posterior_dist = distribution_fn(concentration=loc, scale=scale,
+                                         validate_args=validate_args)
+
+        # Ensure the distribution has the desired number of event dimensions.
+        static_event_ndims = tf.get_static_value(event_ndims)
+        if static_event_ndims is None or static_event_ndims > 0:
+            posterior_dist = tfd.Independent(
+                posterior_dist,
+                reinterpreted_batch_ndims=event_ndims,
+                validate_args=validate_args)
+
+    return posterior_dist
+
+
+build_trainable_InverseGamma_dist = functools.partial(
+    build_trainable_concentration_scale_distribution,
+    distribution_fn=tfd.InverseGamma
+)
+
+build_trainable_normal_dist = functools.partial(
+    build_trainable_location_scale_distribution,
+    distribution_fn=tfd.Normal)

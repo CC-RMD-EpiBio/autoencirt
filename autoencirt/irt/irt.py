@@ -1,6 +1,14 @@
 import tensorflow as tf
 import numpy as np
 from autoencirt.nn import Dense, DenseHorseshoe
+import tensorflow_probability as tfp
+from tensorflow_probability.python import util as tfp_util
+from tensorflow_probability.python.bijectors import softplus as softplus_lib
+from autoencirt.tools.tf import (
+    clip_gradients, run_chain, LossLearningRateScheduler,
+    build_trainable_InverseGamma_dist,
+    build_trainable_normal_dist
+)
 
 
 class IRTModel(object):
@@ -78,5 +86,76 @@ class IRTModel(object):
         def loss():
             dnn_fun = dnn.build_network(dnn_params, tf.nn.relu)
             return -ability_distribution.log_prob(dnn_fun(self.response_data))
-        
 
+    def calibrate_mcmc(self, init_state=None, step_size=1e-3,
+                       num_steps=1000, burnin=500, nuts=True):
+        """Calibrate using HMC/NUT
+
+        Keyword Arguments:
+            num_chains {int} -- [description] (default: {1})
+        """
+        if init_state is None:
+            surrogate_expectations = {
+                k: tf.reduce_mean(v, axis=0)
+                for k, v in self.surrogate_sample.items()}
+            init_state = surrogate_expectations
+
+        initial_list = tf.nest.flatten(init_state)
+        bijectors = [self.bijectors[k] for k in sorted(init_state.keys())]
+        samples, sampler_stat = run_chain(
+            init_state=initial_list,
+            step_size=step_size,
+            target_log_prob_fn=self.unormalized_log_prob_list,
+            unconstraining_bijectors=bijectors,
+            num_steps=num_steps,
+            burnin=burnin,
+            nuts=nuts
+        )
+        self.surrogate_sample = tf.nest.pack_sequence_as(
+            self.surrogate_sample, samples
+        )
+        self.set_calibration_expectations()
+
+        return samples, sampler_stat
+
+    @tf.function
+    def unormalized_log_prob_list(self, *x):
+        return self.unormalized_log_prob(
+            **tf.nest.pack_sequence_as(
+                self.surrogate_sample,
+                x
+            ))
+
+    @tf.function
+    def unormalized_log_prob(self, **x):
+        x['x'] = self.calibration_data
+        return self.weighted_likelihood.log_prob(x)
+
+    def calibrate_advi(
+            self, num_steps=10, initial_learning_rate=5e-3,
+            decay_rate=0.99, learning_rate=None):
+        if learning_rate is None:
+            learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
+                initial_learning_rate=initial_learning_rate,
+                decay_steps=num_steps,
+                decay_rate=decay_rate,
+                staircase=True)
+        opt = tf.optimizers.Adam(
+            learning_rate=learning_rate)
+
+        @tf.function
+        def run_approximation(num_steps):
+            losses = tfp.vi.fit_surrogate_posterior(
+                target_log_prob_fn=clip_gradients(
+                    self.unormalized_log_prob, 2.),
+                surrogate_posterior=self.surrogate_posterior,
+                optimizer=opt,
+                num_steps=num_steps,
+                sample_size=10
+            )
+            return(losses)
+
+        losses = run_approximation(num_steps)
+        self.set_calibration_expectations()
+        print(losses)
+        return
