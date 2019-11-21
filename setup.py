@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="joshchang", # Replace with your own username
+    name="autoencirt", # Replace with your own username
     version="0.0.1",
     author="Josh Chang",
     author_email="josh@mederrata.com",
@@ -20,7 +20,7 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.7',
+    python_requires='>=3.6',
     scripts=[
         'autoencirt/scripts/rwas_cv.py',
         'autoencirt/scripts/test_nn.py'
