@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from autoencirt.nn import DenseNetwork, DenseHorseshoeNetwork
+from autoencirt.nn import Dense, DenseHorseshoe
 
 
 class IRTModel(object):
@@ -19,14 +19,17 @@ class IRTModel(object):
     calibrated_difficulties = None
     calibrated_likelihood_distribution = None
     bijectors = None
+    dimensional_decay = 0.25
+    surrogate_sample = None
 
     scoring_network = None
 
     def __init__(self):
         pass
 
-    def set_dimension(self, dim):
+    def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim
+        self.dimensional_decay = decay
 
     def load_data(self, response_data):
         self.response_data = response_data
@@ -55,7 +58,25 @@ class IRTModel(object):
             return
         if hidden_layers is None:
             hidden_layers = [self.num_items*2, self.num_items*2]
-        nn = DenseNetwork(
+        dnn = DenseNetwork(
             self.num_items,
             [self.num_items] + hidden_layers + [self.dimensions]
             )
+        ability_distribution = tfd.Independent(
+            tfd.Normal(
+                loc=tf.reduce_mean(
+                    self.surrogate_sample['abilities'],
+                    axis=0),
+                scale=tf.math.reduce_std(
+                    self.surrogate_sample['abilities'],
+                    axis=0
+                )
+            ), reinterpreted_batch_ndims=2
+        )
+        dnn_params = dnn.weights
+
+        def loss():
+            dnn_fun = dnn.build_network(dnn_params, tf.nn.relu)
+            return -ability_distribution.log_prob(dnn_fun(self.response_data))
+        
+

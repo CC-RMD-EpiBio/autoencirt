@@ -39,7 +39,6 @@ class GRModel(IRTModel):
     """
     data = None
     response_type = "polytomous"
-    dimensional_decay = 0.1
 
     def __init__(self, auxiliary_parameterization=True):
         super().__init__()
@@ -294,7 +293,6 @@ class GRModel(IRTModel):
 
         self.set_calibration_expectations()
 
-
     @tf.function
     def unormalized_log_prob(self, **x):
         x['x'] = self.calibration_data
@@ -337,9 +335,9 @@ class GRModel(IRTModel):
                 self.surrogate_sample,
                 x
             ))
-        
+
     def calibrate_mcmc(self, init_state=None, step_size=1e-3,
-                       num_steps=1000, burnin=500):
+                       num_steps=1000, burnin=500, nuts=True):
         """Calibrate using HMC/NUT
 
         Keyword Arguments:
@@ -359,16 +357,18 @@ class GRModel(IRTModel):
             target_log_prob_fn=self.unormalized_log_prob_list,
             unconstraining_bijectors=bijectors,
             num_steps=num_steps,
-            burnin=burnin
+            burnin=burnin,
+            nuts=nuts
         )
         self.surrogate_sample = tf.nest.pack_sequence_as(
             self.surrogate_sample, samples
-            )
+        )
         self.set_calibration_expectations()
-        
+
         return samples, sampler_stat
 
     def score(self, responses):
+        # Find the EAP, marginalized over calibration_samples
         num_people = responses.shape[0]
 
         pass

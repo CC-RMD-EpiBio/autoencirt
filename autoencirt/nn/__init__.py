@@ -1,1 +1,1 @@
-from .dense import DenseNetwork, DenseHorseshoeNetwork
+from .dense import Dense, DenseHorseshoe, DenseHorseshoeAE
