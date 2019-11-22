@@ -7,25 +7,30 @@ from autoencirt.irt import GRModel
 
 @tf.function
 def grm_model_prob(abilities, discriminations, difficulties):
-    offsets = difficulties[tf.newaxis, :, :, :] - \
-        abilities[:, :, tf.newaxis, tf.newaxis]
-    scaled = offsets*discriminations[tf.newaxis, :, :, tf.newaxis]
+    offsets = difficulties - abilities  # N x D x I x K-1
+    scaled = offsets*discriminations
     logits = 1.0/(1+tf.exp(scaled))
-    logits = tf.pad(logits, paddings=(
-        (0, 0), (0, 0), (0, 0), (1, 0)), mode='constant', constant_values=1)
-    logits = tf.pad(logits, paddings=(
-        (0, 0), (0, 0), (0, 0), (0, 1)), mode='constant', constant_values=0)
-    probs = logits[:, :, :, :-1] - logits[:, :, :, 1:]
+    logits = tf.pad(
+        logits,
+        paddings=(
+            [(0, 0)]*(len(tf.shape(logits)) - 1) + [(1, 0)]),
+        mode='constant',
+        constant_values=1)
+    logits = tf.pad(
+        logits,
+        paddings=(
+            [(0, 0)]*(len(tf.shape(logits)) - 1) + [(0, 1)]),
+        mode='constant', constant_values=0)
+    probs = logits[..., :-1] - logits[..., 1:]
 
     # weight by discrimination
     # \begin{align}
     #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
     # \end{align}
     weights = discriminations / \
-        tf.reduce_sum(discriminations, axis=0)[tf.newaxis, :]
-    probs = tf.reduce_sum(probs*weights[tf.newaxis, :, :, tf.newaxis], axis=1)
+        tf.reduce_sum(discriminations, axis=-3)[..., tf.newaxis, :, :]
+    probs = tf.reduce_sum(probs*weights, axis=-3)
     return probs
-
 
 """
 Probabilities for single items

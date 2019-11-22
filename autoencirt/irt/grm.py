@@ -85,6 +85,53 @@ class GRModel(IRTModel):
         return self.grm_model_prob(abilities, discriminations, difficulties)
 
     @tf.function
+    def joint_log_prob(self, responses, discriminations, difficulties0, ddifficulties, abilities, xi, eta, mu):
+        d0 = tf.concat(
+            [difficulties0, ddifficulties], axis=-1)
+        difficulties = tf.cumsum(d0, axis=2)
+        return (tf.reduce_sum(
+            self.log_likelihood(
+                responses, discriminations,
+                difficulties, abilities)
+        )
+            + self.joint_log_prior(discriminations, difficulties0,
+                                   ddifficulties, abilities, xi, eta, mu))
+
+    @tf.function
+    def log_likelihood(self, responses, discriminations, difficulties, abilities):
+        rv_responses = tfd.Categorical(self.grm_model_prob(
+            abilities, discriminations, difficulties))
+        return rv_responses.log_prob(responses)
+
+    @tf.function
+    def joint_log_prior(self, discriminations, difficulties0,
+                        ddifficulties, abilities, xi, eta, mu):
+        D = discriminations.shape[0]
+        rv_discriminations = tfd.HalfNormal(scale=eta*xi)
+        rv_difficulties0 = tfd.Normal(loc=mu, scale=1.)
+        rv_ddifficulties = tfd.HalfNormal(scale=tf.ones_like(ddifficulties))
+        rv_abilities = tfd.Normal(loc=tf.zeros_like(abilities), scale=1.)
+        rv_eta = tfd.HalfCauchy(loc=tf.zeros_like(
+            eta), scale=tf.ones_like(eta))  # global
+        rv_xi = tfd.HalfCauchy(
+            loc=tf.zeros_like(xi),
+            scale=tf.ones_like(xi))  # local
+        rv_mu = tfd.Normal(loc=tf.zeros_like(mu), scale=1.)
+
+        return tf.reduce_sum(rv_discriminations.log_prob(discriminations)) + \
+            tf.reduce_sum(rv_difficulties0.log_prob(difficulties0)) + \
+            tf.reduce_sum(rv_ddifficulties.log_prob(ddifficulties)) + \
+            tf.reduce_sum(rv_abilities.log_prob(abilities)) + \
+            tf.reduce_sum(rv_eta.log_prob(eta)) + \
+            tf.reduce_sum(rv_xi.log_prob(xi)) + \
+            tf.reduce_sum(rv_mu.log_prob(mu))
+
+    def joint_log_prior_auxiliary(self, discriminations, difficulties0,
+                                  ddifficulties, abilities, xi, eta, mu,
+                                  xi_a, eta_a):
+        pass
+
+    @tf.function
     def compute_likelihood_distribution(self, abilities,
                                         discriminations, difficulties0,
                                         ddifficulties):
@@ -110,7 +157,8 @@ class GRModel(IRTModel):
         xi_scale = tf.ones((1, self.dimensions, self.num_items, 1))
         difficulties0 = np.sort(
             np.random.normal(
-                size=(1, self.dimensions,
+                size=(1,
+                      self.dimensions,
                       self.num_items,
                       self.response_cardinality-1)
             ),
@@ -369,8 +417,8 @@ class GRModel(IRTModel):
 
         self.bijectors['eta'] = tfp.bijectors.Softplus()
         self.bijectors['xi'] = tfp.bijectors.Softplus()
-        self.bijectors['discriminations'] = tfp.bijectors.Exp()
-        self.bijectors['ddifficulties'] = tfp.bijectors.Exp()
+        self.bijectors['discriminations'] = tfp.bijectors.Softplus()
+        self.bijectors['ddifficulties'] = tfp.bijectors.Softplus()
         if self.auxiliary_parameterization:
             self.bijectors['eta_a'] = tfp.bijectors.Softplus()
             self.bijectors['xi_a'] = tfp.bijectors.Softplus()
@@ -397,3 +445,13 @@ class GRModel(IRTModel):
 
     def loss(self, responses, scores):
         pass
+
+    @tf.function
+    def unormalized_log_prob(self, **x):
+        if self.auxiliary_parameterization:
+            x['x'] = self.calibration_data
+            return self.weighted_likelihood.log_prob(x)
+        else:
+            return self.joint_log_prob(
+                **x,
+                responses=self.calibration_data)

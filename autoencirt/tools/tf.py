@@ -90,7 +90,7 @@ def run_chain(
                 state_gradients_are_stopped=True),
             bijector=unconstraining_bijectors)
         kernel = tfp.mcmc.SimpleStepSizeAdaptation(
-            inner_kernel=hmc, num_adaptation_steps=int(0.8*num_steps))
+            inner_kernel=hmc, num_adaptation_steps=int(0.8*burnin))
         chain_state, sampler_stat = tfp.mcmc.sample_chain(
             num_results=num_steps,
             num_burnin_steps=burnin,
