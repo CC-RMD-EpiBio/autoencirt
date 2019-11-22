@@ -72,6 +72,10 @@ def log_likelihood(responses, discriminations, difficulties, abilities):
         abilities, discriminations, difficulties))
     return rv_responses.log_prob(responses)
 
+# return vector of length D
+def dimensional_decay(D):
+    pass
+
 
 @tf.function
 def joint_log_prior(discriminations, difficulties0, ddifficulties, abilities, xi, eta, mu):

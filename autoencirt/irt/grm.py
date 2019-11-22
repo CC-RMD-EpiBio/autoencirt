@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import itertools
 import numpy as np
 import pandas as pd
 
@@ -16,8 +17,6 @@ import tensorflow_probability as tfp
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.mcmc.transformed_kernel import (
     make_transform_fn, make_transformed_log_prob, make_log_det_jacobian_fn)
-from tensorflow_probability.python.experimental.vi.surrogate_posteriors import (
-    build_factored_surrogate_posterior)
 
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
 
@@ -38,7 +37,6 @@ class GRModel(IRTModel):
     Returns:
         [type] -- [description]
     """
-    data = None
     response_type = "polytomous"
 
     def __init__(self, auxiliary_parameterization=True):
@@ -85,7 +83,9 @@ class GRModel(IRTModel):
         return self.grm_model_prob(abilities, discriminations, difficulties)
 
     @tf.function
-    def joint_log_prob(self, responses, discriminations, difficulties0, ddifficulties, abilities, xi, eta, mu):
+    def joint_log_prob(self, responses, discriminations,
+                       difficulties0, ddifficulties, abilities,
+                       xi, eta, mu):
         d0 = tf.concat(
             [difficulties0, ddifficulties], axis=-1)
         difficulties = tf.cumsum(d0, axis=2)
@@ -98,7 +98,26 @@ class GRModel(IRTModel):
                                    ddifficulties, abilities, xi, eta, mu))
 
     @tf.function
-    def log_likelihood(self, responses, discriminations, difficulties, abilities):
+    def joint_log_prob_auxiliary(self, responses, discriminations,
+                                 difficulties0, ddifficulties, abilities,
+                                 xi, eta, mu, xi_a, eta_a):
+        d0 = tf.concat(
+            [difficulties0, ddifficulties], axis=-1)
+        difficulties = tf.cumsum(d0, axis=2)
+        return (
+            tf.reduce_sum(
+                self.log_likelihood(
+                    responses, discriminations,
+                    difficulties, abilities)
+            )
+            + self.joint_log_prior_auxiliary(
+                discriminations, difficulties0,
+                ddifficulties, abilities, xi, eta,
+                mu, xi_a, eta_a))
+
+    @tf.function
+    def log_likelihood(self, responses, discriminations,
+                       difficulties, abilities):
         rv_responses = tfd.Categorical(self.grm_model_prob(
             abilities, discriminations, difficulties))
         return rv_responses.log_prob(responses)
@@ -118,34 +137,42 @@ class GRModel(IRTModel):
             scale=tf.ones_like(xi))  # local
         rv_mu = tfd.Normal(loc=tf.zeros_like(mu), scale=1.)
 
-        return tf.reduce_sum(rv_discriminations.log_prob(discriminations)) + \
-            tf.reduce_sum(rv_difficulties0.log_prob(difficulties0)) + \
-            tf.reduce_sum(rv_ddifficulties.log_prob(ddifficulties)) + \
-            tf.reduce_sum(rv_abilities.log_prob(abilities)) + \
-            tf.reduce_sum(rv_eta.log_prob(eta)) + \
-            tf.reduce_sum(rv_xi.log_prob(xi)) + \
-            tf.reduce_sum(rv_mu.log_prob(mu))
+        return (tf.reduce_sum(rv_discriminations.log_prob(discriminations))
+                + tf.reduce_sum(rv_difficulties0.log_prob(difficulties0))
+                + tf.reduce_sum(rv_ddifficulties.log_prob(ddifficulties))
+                + tf.reduce_sum(rv_abilities.log_prob(abilities))
+                + tf.reduce_sum(rv_eta.log_prob(eta))
+                + tf.reduce_sum(rv_xi.log_prob(xi))
+                + tf.reduce_sum(rv_mu.log_prob(mu)))
 
     def joint_log_prior_auxiliary(self, discriminations, difficulties0,
                                   ddifficulties, abilities, xi, eta, mu,
                                   xi_a, eta_a):
-        pass
+        rv_discriminations = tfd.HalfNormal(scale=eta*xi)
+        rv_difficulties0 = tfd.Normal(loc=mu, scale=1.)
+        rv_ddifficulties = tfd.HalfNormal(scale=tf.ones_like(ddifficulties))
+        rv_abilities = tfd.Normal(loc=tf.zeros_like(abilities), scale=1.)
+        rv_eta = tfd.InverseGamma(concentration=0.5*tf.ones_like(
+            eta), scale=1.0/eta_a)  # global
+        rv_xi = tfd.InverseGamma(
+            concentration=0.5*tf.ones_like(xi),
+            scale=1.0/xi_a)  # local
+        rv_eta_a = tfd.InverseGamma(concentration=0.5*tf.ones_like(
+            eta_a), scale=tf.ones_like(eta_a))  # global
+        rv_xi_a = tfd.InverseGamma(
+            concentration=0.5*tf.ones_like(xi_a),
+            scale=tf.ones_like(xi_a))  # local
+        rv_mu = tfd.Normal(loc=tf.zeros_like(mu), scale=1.)
 
-    @tf.function
-    def compute_likelihood_distribution(self, abilities,
-                                        discriminations, difficulties0,
-                                        ddifficulties):
-        return tfd.Independent(
-            tfd.Categorical(
-                self.grm_model_prob_d(
-                    abilities,
-                    discriminations,
-                    difficulties0,
-                    ddifficulties
-                ),
-                validate_args=True),
-            reinterpreted_batch_ndims=2
-        )
+        return (tf.reduce_sum(rv_discriminations.log_prob(discriminations))
+                + tf.reduce_sum(rv_difficulties0.log_prob(difficulties0))
+                + tf.reduce_sum(rv_ddifficulties.log_prob(ddifficulties))
+                + tf.reduce_sum(rv_abilities.log_prob(abilities))
+                + tf.reduce_sum(rv_eta.log_prob(eta**2))
+                + tf.reduce_sum(rv_xi.log_prob(xi**2))
+                + tf.reduce_sum(rv_mu.log_prob(mu))
+                + tf.reduce_sum(rv_eta_a.log_prob(eta_a))
+                + tf.reduce_sum(rv_xi_a.log_prob(xi_a)))
 
     def joint_prior_distribution(self):
         """Joint probability with measure over observations
@@ -390,18 +417,12 @@ class GRModel(IRTModel):
                 self.calibrated_ddifficulties
             ], axis=-1), axis=-1
         )
-        self.calibrated_likelihood_distribution = tfd.JointDistributionNamed({
-            'x': tfd.Independent(
-                tfd.Categorical(
-                    self.grm_model_prob(
-                        self.calibrated_traits,
-                        self.calibrated_discriminations,
-                        self.calibrated_difficulties
-                    ), validate_args=True
-                ),
-                reinterpreted_batch_ndims=2
-            )
-        })
+
+        self.calibrated_trait_scale = tf.math.reduce_std(
+            self.calibrated_traits, axis=-4)
+        self.calibrated_trait_loc = tf.reduce_mean(
+            self.calibrated_traits, axis=-4
+        )
 
     def create_distributions(self):
         """Create the relevant prior distributions
@@ -423,7 +444,10 @@ class GRModel(IRTModel):
             self.bijectors['eta_a'] = tfp.bijectors.Softplus()
             self.bijectors['xi_a'] = tfp.bijectors.Softplus()
 
-        self.weighted_likelihood, self.surrogate_posterior = self.joint_prior_distribution()
+        (
+            self.weighted_likelihood,
+            self.surrogate_posterior
+        ) = self.joint_prior_distribution()
 
         event_shape = self.weighted_likelihood.event_shape_tensor()
         del event_shape['x']
@@ -437,11 +461,61 @@ class GRModel(IRTModel):
         """
         self.set_calibration_expectations()
 
-    def score(self, responses):
-        # Find the EAP, marginalized over calibration_samples
-        num_people = responses.shape[0]
+    def score(self, responses, samples=150):
+        responses = tf.cast(responses, np.int32)
+        """Compute expections by importance sampling
 
-        pass
+        Arguments:
+            responses {[type]} -- [description]
+
+        Keyword Arguments:
+            samples {int} -- Number of samples to use (default: {1000})
+        """
+        sampling_rv = tfd.Independent(
+            tfd.Normal(
+                loc=self.calibrated_trait_loc,
+                scale=self.calibrated_trait_scale*3
+            ),
+            reinterpreted_batch_ndims=3
+        )
+        trait_samples = tf.expand_dims(
+            sampling_rv.sample(samples),
+            axis=-4
+        )
+
+        sample_log_p = sampling_rv.log_prob(trait_samples)
+
+        response_probs = self.grm_model_prob_d(
+            abilities=tf.expand_dims(trait_samples, 1),
+            discriminations=self.surrogate_sample[
+                'discriminations'
+                ][tf.newaxis, ...],
+            difficulties0=self.surrogate_sample[
+                'difficulties0'
+                ][tf.newaxis, ...],
+            ddifficulties=self.surrogate_sample[
+                'ddifficulties'
+                ][tf.newaxis, ...]
+        )
+
+        response_probs = tf.reduce_mean(response_probs, axis=-4)
+
+        response_rv = tfd.Independent(
+            tfd.Categorical(response_probs),
+            reinterpreted_batch_ndims=1
+        )
+        lp = response_rv.log_prob(responses)
+        l_w = lp - sample_log_p
+        l_w = l_w - tf.reduce_max(l_w, axis=0)[tf.newaxis, :]
+        w = tf.math.exp(l_w)/tf.reduce_sum(tf.math.exp(l_w), axis=0)
+        mean = tf.reduce_sum(
+            w[..., tf.newaxis, tf.newaxis, tf.newaxis]*trait_samples,
+            axis=0)
+        mean2 = tf.math.reduce_sum(
+            w[..., tf.newaxis, tf.newaxis, tf.newaxis]*trait_samples**2,
+            axis=0)
+        std = tf.sqrt(mean2-mean**2)
+        return mean, std
 
     def loss(self, responses, scores):
         pass
@@ -449,9 +523,12 @@ class GRModel(IRTModel):
     @tf.function
     def unormalized_log_prob(self, **x):
         if self.auxiliary_parameterization:
-            x['x'] = self.calibration_data
-            return self.weighted_likelihood.log_prob(x)
+            return self.joint_log_prob_auxiliary(
+                **x,
+                responses=self.calibration_data
+            )
         else:
             return self.joint_log_prob(
                 **x,
-                responses=self.calibration_data)
+                responses=self.calibration_data
+            )

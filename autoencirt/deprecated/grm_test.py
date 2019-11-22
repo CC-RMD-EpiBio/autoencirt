@@ -92,9 +92,6 @@ def main():
     grm.load_data(data)
     grm.create_distributions()
     test_state = grm.surrogate_sample.copy()
-    test_state['responses'] = tf.cast(data.to_numpy(), tf.float32)
-, *    print(unnormalized_posterior_log_prob(**test_state))
-    1
 
 
 

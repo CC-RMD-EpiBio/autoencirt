@@ -1,9 +1,11 @@
 import tensorflow as tf
 import numpy as np
+from itertools import product
 from autoencirt.nn import Dense, DenseHorseshoe
 
 from factor_analyzer import (
     FactorAnalyzer)
+
 
 import tensorflow_probability as tfp
 from tensorflow_probability.python import util as tfp_util
@@ -30,18 +32,30 @@ class IRTModel(object):
     calibrated_discriminations_sd = None
     calibrated_difficulties = None
     calibrated_likelihood_distribution = None
+    calibrated_trait_scale = 1
     bijectors = None
     dimensional_decay = 0.25
     surrogate_sample = None
+    scoring_grid = None  # D dimensional
+    grid = None
 
     scoring_network = None
 
     def __init__(self):
-        pass
+        self.set_dimension(1)
 
-    def set_dimension(self, dim, decay=0.25):
+    def set_dimension(self, dim, decay=0.25, bins=50):
         self.dimensions = dim
         self.dimensional_decay = decay
+
+    def set_params_from_samples(self, samples):
+        try:
+            for key in self.surrogate_sample.keys():
+                self.surrogate_sample[key] = samples[key]
+        except KeyError:
+            print(str(key) + " doesn't exist in your samples")
+            return
+        self.set_calibration_expectations()
 
     def load_data(self, response_data):
         self.response_data = response_data
@@ -57,6 +71,9 @@ class IRTModel(object):
         self.calibration_data = tf.cast(response_data.to_numpy(), tf.int32)
 
     def create_distributions(self):
+        pass
+
+    def set_calibration_expectations(self):
         pass
 
     def calibrate(self):
@@ -77,7 +94,7 @@ class IRTModel(object):
         dnn = DenseNetwork(
             self.num_items,
             [self.num_items] + hidden_layers + [self.dimensions]
-            )
+        )
         ability_distribution = tfd.Independent(
             tfd.Normal(
                 loc=tf.reduce_mean(
