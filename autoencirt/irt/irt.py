@@ -3,10 +3,6 @@ import numpy as np
 from itertools import product
 from autoencirt.nn import Dense, DenseHorseshoe
 
-from factor_analyzer import (
-    FactorAnalyzer)
-
-
 import tensorflow_probability as tfp
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
@@ -44,7 +40,7 @@ class IRTModel(object):
     def __init__(self):
         self.set_dimension(1)
 
-    def set_dimension(self, dim, decay=0.25, bins=50):
+    def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim
         self.dimensional_decay = decay
 
@@ -62,10 +58,6 @@ class IRTModel(object):
         self.num_people = response_data.shape[0]
         self.num_items = response_data.shape[1]
         self.response_cardinality = int(max(response_data.max())) + 1
-        fa = FactorAnalyzer(
-            rotation=None, n_factors=self.dimensions)
-        fa.fit(response_data)
-        self.linear_loadings = fa.loadings_
         if int(min(response_data.min())) == 1:
             print("Warning: responses do not appear to be from zero")
         self.calibration_data = tf.cast(response_data.to_numpy(), tf.int32)
@@ -152,7 +144,7 @@ class IRTModel(object):
             ))
 
     @tf.function
-    def unormalized_log_prob(self, **x):
+    def unormalized_log_prob2(self, **x):
         x['x'] = self.calibration_data
         return self.weighted_likelihood.log_prob(x)
 

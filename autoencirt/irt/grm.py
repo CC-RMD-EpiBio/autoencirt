@@ -65,8 +65,10 @@ class GRModel(IRTModel):
         # \begin{align}
         #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
         # \end{align}
-        weights = discriminations / \
-            tf.reduce_sum(discriminations, axis=-3)[..., tf.newaxis, :, :]
+        weights = (
+            discriminations
+            / tf.reduce_sum(
+                discriminations, axis=-3)[..., tf.newaxis, :, :])
         probs = tf.reduce_sum(probs*weights, axis=-3)
         return probs
 
@@ -88,7 +90,7 @@ class GRModel(IRTModel):
                        xi, eta, mu):
         d0 = tf.concat(
             [difficulties0, ddifficulties], axis=-1)
-        difficulties = tf.cumsum(d0, axis=2)
+        difficulties = tf.cumsum(d0, axis=-1)
         return (tf.reduce_sum(
             self.log_likelihood(
                 responses, discriminations,
@@ -126,16 +128,25 @@ class GRModel(IRTModel):
     def joint_log_prior(self, discriminations, difficulties0,
                         ddifficulties, abilities, xi, eta, mu):
         D = discriminations.shape[0]
-        rv_discriminations = tfd.HalfNormal(scale=eta*xi)
-        rv_difficulties0 = tfd.Normal(loc=mu, scale=1.)
-        rv_ddifficulties = tfd.HalfNormal(scale=tf.ones_like(ddifficulties))
-        rv_abilities = tfd.Normal(loc=tf.zeros_like(abilities), scale=1.)
-        rv_eta = tfd.HalfCauchy(loc=tf.zeros_like(
-            eta), scale=tf.ones_like(eta))  # global
+        rv_discriminations = tfd.HalfNormal(
+            scale=eta*xi)
+        rv_difficulties0 = tfd.Normal(
+            loc=mu,
+            scale=tf.ones_like(mu))
+        rv_ddifficulties = tfd.HalfNormal(
+            scale=tf.ones_like(ddifficulties))
+        rv_abilities = tfd.Normal(
+            loc=tf.zeros_like(abilities),
+            scale=tf.ones_like(abilities))
+        rv_eta = tfd.HalfCauchy(
+            loc=tf.zeros_like(eta),
+            scale=tf.ones_like(eta))  # global
         rv_xi = tfd.HalfCauchy(
             loc=tf.zeros_like(xi),
             scale=tf.ones_like(xi))  # local
-        rv_mu = tfd.Normal(loc=tf.zeros_like(mu), scale=1.)
+        rv_mu = tfd.Normal(
+            loc=tf.zeros_like(mu),
+            scale=tf.ones_like(mu))
 
         return (tf.reduce_sum(rv_discriminations.log_prob(discriminations))
                 + tf.reduce_sum(rv_difficulties0.log_prob(difficulties0))
@@ -197,13 +208,14 @@ class GRModel(IRTModel):
             mu=tfd.Independent(
                 tfd.Normal(
                     loc=tf.zeros((1, self.dimensions, self.num_items, 1)),
-                    scale=1.
+                    scale=tf.ones((1, self.dimensions, self.num_items, 1))
                 ),
                 reinterpreted_batch_ndims=4
             ),  # mu
             eta=tfd.Independent(
                 tfd.HalfCauchy(
-                    loc=tf.zeros((1, 1, self.num_items, 1)), scale=.1
+                    loc=tf.zeros((1, 1, self.num_items, 1)),
+                    scale=tf.ones((1, 1, self.num_items, 1))
                 ),
                 reinterpreted_batch_ndims=4
             ),  # eta
@@ -215,32 +227,20 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=4
             ),  # xi
             difficulties0=lambda mu: tfd.Independent(
-                tfd.Normal(loc=mu, scale=1.),
+                tfd.Normal(
+                    loc=mu,
+                    scale=tf.ones((1, self.dimensions, self.num_items, 1))),
                 reinterpreted_batch_ndims=4
             ),  # difficulties0
             discriminations=lambda eta, xi: tfd.Independent(
-                tfp.distributions.LogNormal(
-                    loc=tf.cast(
-                        self.linear_loadings.T**2, tf.float32)[
-                            tf.newaxis, ..., tf.newaxis],
-                    scale=eta*xi),
+                tfd.HalfNormal(scale=eta*xi),
                 reinterpreted_batch_ndims=4
             ),  # discrimination
             ddifficulties=tfd.Independent(
-                LogNormal(
-                    loc=0.25*tf.ones(
-                        (1,
-                         self.dimensions,
-                         self.num_items,
-                         self.response_cardinality-2
-                         )
-                    ),
+                tfd.HalfNormal(
                     scale=tf.ones(
-                        (1,
-                         self.dimensions,
-                         self.num_items,
-                         self.response_cardinality-2
-                         )
+                        (1, self.dimensions, self.num_items,
+                         self.response_cardinality-2)
                     )
                 ),
                 reinterpreted_batch_ndims=4
@@ -248,7 +248,7 @@ class GRModel(IRTModel):
             abilities=tfd.Independent(
                 tfd.Normal(
                     loc=tf.zeros((self.num_people, self.dimensions, 1, 1)),
-                    scale=1.
+                    scale=tf.ones((self.num_people, self.dimensions, 1, 1))
                 ),
                 reinterpreted_batch_ndims=4
             ),
@@ -353,7 +353,7 @@ class GRModel(IRTModel):
             grm_joint_distribution_dict["eta_a"] = tfd.Independent(
                 tfd.InverseGamma(
                     0.5*tf.ones((1, 1, self.num_items, 1)),
-                    100*tf.ones((1, 1, self.num_items, 1))
+                    tf.ones((1, 1, self.num_items, 1))
                 ),
                 reinterpreted_batch_ndims=4
             )
@@ -489,13 +489,13 @@ class GRModel(IRTModel):
             abilities=tf.expand_dims(trait_samples, 1),
             discriminations=self.surrogate_sample[
                 'discriminations'
-                ][tf.newaxis, ...],
+            ][tf.newaxis, ...],
             difficulties0=self.surrogate_sample[
                 'difficulties0'
-                ][tf.newaxis, ...],
+            ][tf.newaxis, ...],
             ddifficulties=self.surrogate_sample[
                 'ddifficulties'
-                ][tf.newaxis, ...]
+            ][tf.newaxis, ...]
         )
 
         response_probs = tf.reduce_mean(response_probs, axis=-4)
@@ -521,6 +521,14 @@ class GRModel(IRTModel):
         pass
 
     @tf.function
+    def unormalized_log_prob_list(self, *x):
+        return self.unormalized_log_prob(
+            **tf.nest.pack_sequence_as(
+                self.surrogate_sample,
+                x
+            ))
+
+    @tf.function
     def unormalized_log_prob(self, **x):
         if self.auxiliary_parameterization:
             return self.joint_log_prob_auxiliary(
@@ -532,3 +540,11 @@ class GRModel(IRTModel):
                 **x,
                 responses=self.calibration_data
             )
+
+
+def main():
+    pass
+
+
+if __name__ == "__main__":
+    main()

@@ -11,8 +11,6 @@ from tensorflow_probability.python.bijectors import softplus as softplus_lib
 
 
 tfd = tfp.distributions
-
-tfd = tfp.distributions
 tfb = tfp.bijectors
 
 
@@ -66,9 +64,11 @@ def run_chain(
             inner_kernel=kernel,
             num_adaptation_steps=burnin,
             step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
-                inner_results=pkr.inner_results._replace(step_size=new_step_size)),
+                inner_results=pkr.inner_results._replace(
+                    step_size=new_step_size)),
             step_size_getter_fn=lambda pkr: pkr.inner_results.step_size,
-            log_accept_prob_getter_fn=lambda pkr: pkr.inner_results.log_accept_ratio
+            log_accept_prob_getter_fn=lambda pkr: (
+                pkr.inner_results.log_accept_ratio)
         )
 
         # Sampling from the chain.
@@ -86,7 +86,7 @@ def run_chain(
             inner_kernel=tfp.mcmc.HamiltonianMonteCarlo(
                 target_log_prob_fn=target_log_prob_fn,
                 num_leapfrog_steps=num_leapfrog_steps,
-                step_size=0.1,
+                step_size=step_size,
                 state_gradients_are_stopped=True),
             bijector=unconstraining_bijectors)
         kernel = tfp.mcmc.SimpleStepSizeAdaptation(
@@ -107,10 +107,16 @@ class LossLearningRateScheduler(tf.keras.callbacks.History):
     value to dictate whether learning rate is decayed or not.
     LossLearningRateScheduler has the following properties:
     base_lr: the starting learning rate
-    lookback_epochs: the number of epochs in the past to compare with the loss function at the current epoch to determine if progress is being made.
-    decay_threshold / decay_multiple: if loss function has not improved by a factor of decay_threshold * lookback_epochs, then decay_multiple will be applied to the learning rate.
-    spike_epochs: list of the epoch numbers where you want to spike the learning rate.
-    spike_multiple: the multiple applied to the current learning rate for a spike.
+    lookback_epochs: the number of epochs in the past to compare
+        with the loss function at the current epoch to determine if
+        progress is being made.
+    decay_threshold / decay_multiple: if loss function has not improved
+        by a factor of decay_threshold * lookback_epochs, then decay_multiple
+        will be applied to the learning rate.
+    spike_epochs: list of the epoch numbers where you want to spike
+        the learning rate.
+    spike_multiple: the multiple applied to the current learning
+        rate for a spike.
     """
 
     def __init__(
@@ -164,24 +170,26 @@ class LossLearningRateScheduler(tf.keras.callbacks.History):
         return tf.keras.backend.get_value(self.model.optimizer.lr)
 
 
-def build_trainable_concentration_scale_distribution(initial_concentration,
-                                                     initial_scale,
-                                                     event_ndims,
-                                                     distribution_fn=tfd.InverseGamma,
-                                                     validate_args=False,
-                                                     name=None):
+def build_trainable_concentration_scale_distribution(
+        initial_concentration,
+        initial_scale,
+        event_ndims,
+        distribution_fn=tfd.InverseGamma,
+        validate_args=False,
+        name=None):
     """Builds a variational distribution from a location-scale family.
     Args:
       initial_concentration: Float `Tensor` initial concentration.
       initial_scale: Float `Tensor` initial scale.
-      event_ndims: Integer `Tensor` number of event dimensions in `initial_concentration`.
+      event_ndims: Integer `Tensor` number of event dimensions 
+        in `initial_concentration`.
       distribution_fn: Optional constructor for a `tfd.Distribution` instance
         in a location-scale family. This should have signature `dist =
         distribution_fn(loc, scale, validate_args)`.
         Default value: `tfd.Normal`.
-      validate_args: Python `bool`. Whether to validate input with asserts. This
-        imposes a runtime cost. If `validate_args` is `False`, and the inputs are
-        invalid, correct behavior is not guaranteed.
+      validate_args: Python `bool`. Whether to validate input with asserts. 
+        This imposes a runtime cost. If `validate_args` is `False`, and the 
+        inputs are invalid, correct behavior is not guaranteed.
         Default value: `False`.
       name: Python `str` name prefixed to ops created by this function.
         Default value: `None` (i.e.,
@@ -198,7 +206,9 @@ def build_trainable_concentration_scale_distribution(initial_concentration,
         initial_scale = tf.convert_to_tensor(initial_scale, dtype=dtype)
 
         loc = tfp_util.TransformedVariable(
-            initial_concentration, softplus_lib.Softplus(), name='concentration')
+            initial_concentration,
+            softplus_lib.Softplus(),
+            name='concentration')
         scale = tfp_util.TransformedVariable(
             initial_scale, softplus_lib.Softplus(), name='scale')
         posterior_dist = distribution_fn(concentration=loc, scale=scale,
