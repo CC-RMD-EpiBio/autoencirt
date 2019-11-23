@@ -11,7 +11,7 @@ from sklearn.model_selection import KFold
 from factor_analyzer import (
     ConfirmatoryFactorAnalyzer,
     FactorAnalyzer,
-    ModelSpecificationParser)    
+    ModelSpecificationParser)
 
 import autoencirt
 from autoencirt.irt import GRModel
@@ -49,7 +49,11 @@ def main():
         grm.create_distributions()
 
         # Use ADVI to get us close
-        grm.calibrate_advi(50, initial_learning_rate=1e-1)
+        grm.calibrate_advi(100, initial_learning_rate=5e-2)
+        print(grm.calibrated_discriminations[0, ..., 0])
+        grm.calibrate_advi(100, initial_learning_rate=1e-3)
+        print(grm.calibrated_discriminations[0, ..., 0])
+
         grm.score(data.iloc[test_index, :].to_numpy())
         # MCMC sample from here
         grm.calibrate_mcmc(

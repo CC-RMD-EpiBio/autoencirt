@@ -91,13 +91,13 @@ class GRModel(IRTModel):
         d0 = tf.concat(
             [difficulties0, ddifficulties], axis=-1)
         difficulties = tf.cumsum(d0, axis=-1)
-        return (tf.reduce_sum(
+        return (
             self.log_likelihood(
                 responses, discriminations,
                 difficulties, abilities)
-        )
-            + self.joint_log_prior(discriminations, difficulties0,
-                                   ddifficulties, abilities, xi, eta, mu))
+            + self.joint_log_prior(
+                discriminations, difficulties0,
+                ddifficulties, abilities, xi, eta, mu))
 
     @tf.function
     def joint_log_prob_auxiliary(self, responses, discriminations,
@@ -105,85 +105,116 @@ class GRModel(IRTModel):
                                  xi, eta, mu, xi_a, eta_a):
         d0 = tf.concat(
             [difficulties0, ddifficulties], axis=-1)
-        difficulties = tf.cumsum(d0, axis=2)
+        difficulties = tf.cumsum(d0, axis=-1)
         return (
-            tf.reduce_sum(
-                self.log_likelihood(
+            self.log_likelihood(
                     responses, discriminations,
                     difficulties, abilities)
-            )
             + self.joint_log_prior_auxiliary(
                 discriminations, difficulties0,
-                ddifficulties, abilities, xi, eta,
+                ddifficulties, abilities, xi**2, eta**2,
                 mu, xi_a, eta_a))
 
     @tf.function
     def log_likelihood(self, responses, discriminations,
                        difficulties, abilities):
-        rv_responses = tfd.Categorical(self.grm_model_prob(
-            abilities, discriminations, difficulties))
+        rv_responses = tfd.Independent(
+            tfd.Categorical(
+                self.grm_model_prob(
+                    abilities, discriminations, difficulties)),
+            reinterpreted_batch_ndims=2
+        )
         return rv_responses.log_prob(responses)
 
     @tf.function
     def joint_log_prior(self, discriminations, difficulties0,
                         ddifficulties, abilities, xi, eta, mu):
         D = discriminations.shape[0]
-        rv_discriminations = tfd.HalfNormal(
-            scale=eta*xi)
-        rv_difficulties0 = tfd.Normal(
-            loc=mu,
-            scale=tf.ones_like(mu))
-        rv_ddifficulties = tfd.HalfNormal(
-            scale=tf.ones_like(ddifficulties))
-        rv_abilities = tfd.Normal(
-            loc=tf.zeros_like(abilities),
-            scale=tf.ones_like(abilities))
-        rv_eta = tfd.HalfCauchy(
+        rv_discriminations = tfd.Independent(
+            tfd.HalfNormal(scale=eta*xi),
+            reinterpreted_batch_ndims=4)
+        rv_difficulties0 = tfd.Independent(
+            tfd.Normal(
+                loc=mu,
+                scale=tf.ones_like(mu)),
+            reinterpreted_batch_ndims=4
+        )
+        rv_ddifficulties = tfd.Independent(
+            tfd.HalfNormal(
+                scale=tf.ones_like(ddifficulties)),
+            reinterpreted_batch_ndims=4)
+        rv_abilities = tfd.Independent(
+            tfd.Normal(
+                loc=tf.zeros_like(abilities),
+                scale=tf.ones_like(abilities)),
+            reinterpreted_batch_ndims=4)
+        rv_eta = tfd.Independent(tfd.HalfCauchy(
             loc=tf.zeros_like(eta),
-            scale=tf.ones_like(eta))  # global
-        rv_xi = tfd.HalfCauchy(
+            scale=tf.ones_like(eta)),
+            reinterpreted_batch_ndims=4)
+        rv_xi = tfd.Independent(tfd.HalfCauchy(
             loc=tf.zeros_like(xi),
-            scale=tf.ones_like(xi))  # local
-        rv_mu = tfd.Normal(
+            scale=tf.ones_like(xi)),
+            reinterpreted_batch_ndims=4)
+        rv_mu = tfd.Independent(tfd.Normal(
             loc=tf.zeros_like(mu),
-            scale=tf.ones_like(mu))
+            scale=tf.ones_like(mu)),
+            reinterpreted_batch_ndims=4)
 
-        return (tf.reduce_sum(rv_discriminations.log_prob(discriminations))
-                + tf.reduce_sum(rv_difficulties0.log_prob(difficulties0))
-                + tf.reduce_sum(rv_ddifficulties.log_prob(ddifficulties))
-                + tf.reduce_sum(rv_abilities.log_prob(abilities))
-                + tf.reduce_sum(rv_eta.log_prob(eta))
-                + tf.reduce_sum(rv_xi.log_prob(xi))
-                + tf.reduce_sum(rv_mu.log_prob(mu)))
+        return (rv_discriminations.log_prob(discriminations)
+                + rv_difficulties0.log_prob(difficulties0)
+                + rv_ddifficulties.log_prob(ddifficulties)
+                + rv_abilities.log_prob(abilities)
+                + rv_eta.log_prob(eta)
+                + rv_xi.log_prob(xi)
+                + rv_mu.log_prob(mu))
 
     def joint_log_prior_auxiliary(self, discriminations, difficulties0,
                                   ddifficulties, abilities, xi, eta, mu,
                                   xi_a, eta_a):
-        rv_discriminations = tfd.HalfNormal(scale=eta*xi)
-        rv_difficulties0 = tfd.Normal(loc=mu, scale=1.)
-        rv_ddifficulties = tfd.HalfNormal(scale=tf.ones_like(ddifficulties))
-        rv_abilities = tfd.Normal(loc=tf.zeros_like(abilities), scale=1.)
-        rv_eta = tfd.InverseGamma(concentration=0.5*tf.ones_like(
-            eta), scale=1.0/eta_a)  # global
-        rv_xi = tfd.InverseGamma(
-            concentration=0.5*tf.ones_like(xi),
-            scale=1.0/xi_a)  # local
-        rv_eta_a = tfd.InverseGamma(concentration=0.5*tf.ones_like(
-            eta_a), scale=tf.ones_like(eta_a))  # global
-        rv_xi_a = tfd.InverseGamma(
-            concentration=0.5*tf.ones_like(xi_a),
-            scale=tf.ones_like(xi_a))  # local
-        rv_mu = tfd.Normal(loc=tf.zeros_like(mu), scale=1.)
+        rv_discriminations = tfd.Independent(
+            tfd.HalfNormal(scale=eta*xi),
+            reinterpreted_batch_ndims=4)
+        rv_difficulties0 = tfd.Independent(
+            tfd.Normal(loc=mu, scale=1.),
+            reinterpreted_batch_ndims=4)
+        rv_ddifficulties = tfd.Independent(
+            tfd.HalfNormal(scale=tf.ones_like(ddifficulties)),
+            reinterpreted_batch_ndims=4)
+        rv_abilities = tfd.Independent(
+            tfd.Normal(loc=tf.zeros_like(abilities), scale=1.),
+            reinterpreted_batch_ndims=4)
+        rv_eta = tfd.Independent(
+            tfd.InverseGamma(concentration=0.5*tf.ones_like(
+                eta), scale=1.0/eta_a),
+            reinterpreted_batch_ndims=4)  # global
+        rv_xi = tfd.Independent(
+            tfd.InverseGamma(
+                concentration=0.5*tf.ones_like(xi),
+                scale=1.0/xi_a),
+            reinterpreted_batch_ndims=4)  # local
+        rv_eta_a = tfd.Independent(
+            tfd.InverseGamma(concentration=0.5*tf.ones_like(
+                eta_a), scale=tf.ones_like(eta_a)),
+            reinterpreted_batch_ndims=4)  # global
+        rv_xi_a = tfd.Independent(
+            tfd.InverseGamma(
+                concentration=0.5*tf.ones_like(xi_a),
+                scale=tf.ones_like(xi_a)),
+            reinterpreted_batch_ndims=4)  # local
+        rv_mu = tfd.Independent(
+            tfd.Normal(loc=tf.zeros_like(mu), scale=1.),
+            reinterpreted_batch_ndims=4)
 
-        return (tf.reduce_sum(rv_discriminations.log_prob(discriminations))
-                + tf.reduce_sum(rv_difficulties0.log_prob(difficulties0))
-                + tf.reduce_sum(rv_ddifficulties.log_prob(ddifficulties))
-                + tf.reduce_sum(rv_abilities.log_prob(abilities))
-                + tf.reduce_sum(rv_eta.log_prob(eta**2))
-                + tf.reduce_sum(rv_xi.log_prob(xi**2))
-                + tf.reduce_sum(rv_mu.log_prob(mu))
-                + tf.reduce_sum(rv_eta_a.log_prob(eta_a))
-                + tf.reduce_sum(rv_xi_a.log_prob(xi_a)))
+        return (rv_discriminations.log_prob(discriminations)
+                + rv_difficulties0.log_prob(difficulties0)
+                + rv_ddifficulties.log_prob(ddifficulties)
+                + rv_abilities.log_prob(abilities)
+                + rv_eta.log_prob(eta**2)
+                + rv_xi.log_prob(xi**2)
+                + rv_mu.log_prob(mu)
+                + rv_eta_a.log_prob(eta_a)
+                + rv_xi_a.log_prob(xi_a))
 
     def joint_prior_distribution(self):
         """Joint probability with measure over observations
