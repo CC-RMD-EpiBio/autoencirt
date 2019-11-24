@@ -104,7 +104,7 @@ class IRTModel(object):
             dnn_fun = dnn.build_network(dnn_params, tf.nn.relu)
             return -ability_distribution.log_prob(dnn_fun(self.response_data))
 
-    def calibrate_mcmc(self, init_state=None, step_size=1e-3,
+    def calibrate_mcmc(self, init_state=None, step_size=1e-1,
                        num_steps=1000, burnin=500, nuts=True,
                        num_leapfrog_steps=5):
         """Calibrate using HMC/NUT
@@ -129,15 +129,14 @@ class IRTModel(object):
             num_leapfrog_steps=num_leapfrog_steps,
             nuts=nuts
         )
-        self.surrogate_sample = tf.nest.pack_sequence_as(
-            initial_list, [s[burnin:] for s in samples]
-        )
+        self.surrogate_sample = {
+            k: sample for k, sample in zip(self.var_list, samples)
+        }
         self.set_calibration_expectations()
 
         return samples, sampler_stat
 
     def unormalized_log_prob_list(self, *x):
-
         return self.unormalized_log_prob(
                 **{
                     v: t for v, t in zip(self.var_list, x)
@@ -170,11 +169,38 @@ class IRTModel(object):
                 surrogate_posterior=self.surrogate_posterior,
                 optimizer=opt,
                 num_steps=num_steps,
-                sample_size=10
+                sample_size=25
             )
             return(losses)
 
         losses = run_approximation(num_steps)
         self.set_calibration_expectations()
-        print(losses)
-        return
+        return(losses)
+
+    def set_calibration_expectations(self):
+        self.surrogate_sample = self.surrogate_posterior.sample(1000)
+
+        self.calibrated_expectations = {
+            k: tf.reduce_mean(v, axis=0)
+            for k, v in self.surrogate_sample.items()
+        }
+
+        self.calibrated_sd = {
+            k: tf.math.reduce_std(v, axis=0)
+            for k, v in self.surrogate_sample.items()
+        }
+
+    @tf.function
+    def unormalized_log_prob(self, **x):
+        if self.auxiliary_parameterization:
+            return self.joint_log_prob_auxiliary(
+                responses=self.calibration_data,
+                **x
+                
+            )
+        else:
+            return self.joint_log_prob(
+                responses=self.calibration_data,
+                **x
+            )
+

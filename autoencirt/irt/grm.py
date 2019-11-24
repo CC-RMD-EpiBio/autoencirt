@@ -44,7 +44,7 @@ class GRModel(IRTModel):
         self.auxiliary_parameterization = auxiliary_parameterization
         if auxiliary_parameterization:
             self.var_list = inspect.getfullargspec(
-                self.joint_log_prob).args[2:]
+                self.joint_log_prob_auxiliary).args[2:]
 
     @tf.function
     def grm_model_prob(self, abilities, discriminations, difficulties):
@@ -118,7 +118,7 @@ class GRModel(IRTModel):
             )
             + self.joint_log_prior_auxiliary(
                 discriminations, difficulties0,
-                ddifficulties, abilities, xi**2, eta**2,
+                ddifficulties, abilities, xi, eta,
                 mu, xi_a, eta_a))
 
     def log_likelihood(self, responses, discriminations,
@@ -423,18 +423,7 @@ class GRModel(IRTModel):
         return (tfd.JointDistributionNamed(grm_joint_distribution_dict),
                 tfd.JointDistributionNamed(surrogate_distribution_dict))
 
-    def set_calibration_expectations(self):
-        self.surrogate_sample = self.surrogate_posterior.sample(1000)
 
-        self.calibrated_expectations = {
-            k: tf.reduce_mean(v, axis=0)
-            for k, v in self.surrogate_sample.items()
-        }
-
-        self.calibrated_sd = {
-            k: tf.math.reduce_std(v, axis=0)
-            for k, v in self.surrogate_sample.items()
-        }
 
     def create_distributions(self):
         """Create the relevant prior distributions
@@ -473,7 +462,7 @@ class GRModel(IRTModel):
         """
         self.set_calibration_expectations()
 
-    def score(self, responses, samples=150):
+    def score(self, responses, samples=400):
         responses = tf.cast(responses, np.int32)
         """Compute expections by importance sampling
 
@@ -490,7 +479,7 @@ class GRModel(IRTModel):
                     axis=0),
                 scale=tf.math.reduce_std(
                     self.calibrated_expectations['abilities'],
-                    axis=0)*3
+                    axis=0)
             ),
             reinterpreted_batch_ndims=2
         )
@@ -525,7 +514,7 @@ class GRModel(IRTModel):
         )
         lp = response_rv.log_prob(responses)
         l_w = lp[..., tf.newaxis] - sample_log_p[:, tf.newaxis, :]
-        l_w = l_w - tf.reduce_max(l_w, axis=0, keepdims=True)
+        # l_w = l_w - tf.reduce_max(l_w, axis=0, keepdims=True)
         w = tf.math.exp(l_w)/tf.reduce_sum(
             tf.math.exp(l_w), axis=0, keepdims=True)
         mean = tf.reduce_sum(
@@ -535,31 +524,12 @@ class GRModel(IRTModel):
             w*trait_samples[:, tf.newaxis, :, 0, 0]**2,
             axis=0)
         std = tf.sqrt(mean2-mean**2)
-        return mean, std
+        return mean, std, w, trait_samples
 
     def loss(self, responses, scores):
         pass
 
-    @tf.function
-    def unormalized_log_prob_list(self, *x):
-        return self.unormalized_log_prob(
-            **tf.nest.pack_sequence_as(
-                self.surrogate_sample,
-                x
-            ))
 
-    @tf.function
-    def unormalized_log_prob(self, **x):
-        if self.auxiliary_parameterization:
-            return self.joint_log_prob_auxiliary(
-                **x,
-                responses=self.calibration_data
-            )
-        else:
-            return self.joint_log_prob(
-                **x,
-                responses=self.calibration_data
-            )
 
 
 def main():

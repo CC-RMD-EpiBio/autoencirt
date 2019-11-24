@@ -43,13 +43,14 @@ def main():
     kf = KFold(n_splits=10)
     kf.get_n_splits(data)
     for train_index, test_index in kf.split(data):
-        grm = GRModel(auxiliary_parameterization=False)
+        grm = GRModel(auxiliary_parameterization=True)
         grm.set_dimension(2)
         grm.load_data(data.iloc[train_index, :])
         grm.create_distributions()
 
         # Use ADVI to get us close
-        grm.calibrate_advi(50, initial_learning_rate=5e-2)
+        losses = grm.calibrate_advi(100, initial_learning_rate=5e-2
+        print(losses)
         print(grm.calibrated_expectations['discriminations'][0, ..., 0])
 
         grm.score(data.iloc[test_index, :].to_numpy())
@@ -57,9 +58,12 @@ def main():
         # MCMC sample from here
         grm.calibrate_mcmc(
             step_size=1e-1,
-            num_steps=10000,
-            burnin=8000,
+            num_steps=15000,
+            burnin=13000,
             nuts=False)
+
+        grm.score(data.iloc[test_index, :].to_numpy())
+        print(grm.calibrated_expectations['discriminations'][0, ..., 0])
 
         test_data_tensor = tf.cast(
             data.iloc[test_index, :].to_numpy(), tf.int32)
