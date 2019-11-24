@@ -46,7 +46,7 @@ class IRTModel(object):
 
     def set_params_from_samples(self, samples):
         try:
-            for key in self.surrogate_sample.keys():
+            for key in self.var_list:
                 self.surrogate_sample[key] = samples[key]
         except KeyError:
             print(str(key) + " doesn't exist in your samples")
@@ -130,7 +130,7 @@ class IRTModel(object):
             nuts=nuts
         )
         self.surrogate_sample = tf.nest.pack_sequence_as(
-            initial_list, samples
+            initial_list, [s[burnin:] for s in samples]
         )
         self.set_calibration_expectations()
 

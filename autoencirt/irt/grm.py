@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import inspect
 import itertools
 import numpy as np
 import pandas as pd
@@ -492,7 +492,7 @@ class GRModel(IRTModel):
                     self.calibrated_expectations['abilities'],
                     axis=0)*3
             ),
-            reinterpreted_batch_ndims=3
+            reinterpreted_batch_ndims=2
         )
         trait_samples = sampling_rv.sample(samples)
 
@@ -524,15 +524,15 @@ class GRModel(IRTModel):
             reinterpreted_batch_ndims=1
         )
         lp = response_rv.log_prob(responses)
-        l_w = lp - sample_log_p[:, tf.newaxis]
+        l_w = lp[..., tf.newaxis] - sample_log_p[:, tf.newaxis, :]
         l_w = l_w - tf.reduce_max(l_w, axis=0, keepdims=True)
         w = tf.math.exp(l_w)/tf.reduce_sum(
             tf.math.exp(l_w), axis=0, keepdims=True)
         mean = tf.reduce_sum(
-            w[..., tf.newaxis]*trait_samples[:, tf.newaxis, :, 0, 0],
+            w*trait_samples[:, tf.newaxis, :, 0, 0],
             axis=0)
         mean2 = tf.math.reduce_sum(
-            w[..., tf.newaxis]*trait_samples[:, tf.newaxis, :, 0, 0]**2,
+            w*trait_samples[:, tf.newaxis, :, 0, 0]**2,
             axis=0)
         std = tf.sqrt(mean2-mean**2)
         return mean, std
