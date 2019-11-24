@@ -1,6 +1,8 @@
+import inspect
+from itertools import product
+
 import tensorflow as tf
 import numpy as np
-from itertools import product
 from autoencirt.nn import Dense, DenseHorseshoe
 
 import tensorflow_probability as tfp
@@ -22,12 +24,8 @@ class IRTModel(object):
     response_cardinality = None
     dimensions = 1
     weighted_likelihood = None
-    calibrated_traits = None
-    calibrated_traits_sd = None
-    calibrated_discriminations = None
-    calibrated_discriminations_sd = None
-    calibrated_difficulties = None
-    calibrated_likelihood_distribution = None
+    calibrated_expectations = None
+    calibrated_sd = None
     calibrated_trait_scale = 1
     bijectors = None
     dimensional_decay = 0.25
@@ -39,6 +37,8 @@ class IRTModel(object):
 
     def __init__(self):
         self.set_dimension(1)
+        self.var_list = inspect.getfullargspec(
+            self.joint_log_prob).args[2:]
 
     def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim
@@ -111,14 +111,13 @@ class IRTModel(object):
         Keyword Arguments:
             num_chains {int} -- [description] (default: {1})
         """
-        if init_state is None:
-            surrogate_expectations = {
-                k: tf.reduce_mean(v, axis=0)
-                for k, v in self.surrogate_sample.items()}
-            init_state = surrogate_expectations
 
-        initial_list = tf.nest.flatten(init_state)
-        bijectors = [self.bijectors[k] for k in sorted(init_state.keys())]
+        if init_state is None:
+            init_state = self.calibrated_expectations
+
+        initial_list = [init_state[v] for v in self.var_list]
+        bijectors = [self.bijectors[k] for k in self.var_list]
+
         samples, sampler_stat = run_chain(
             init_state=initial_list,
             step_size=step_size,
@@ -129,19 +128,19 @@ class IRTModel(object):
             nuts=nuts
         )
         self.surrogate_sample = tf.nest.pack_sequence_as(
-            self.surrogate_sample, samples
+            initial_list, samples
         )
         self.set_calibration_expectations()
 
         return samples, sampler_stat
 
-    @tf.function
     def unormalized_log_prob_list(self, *x):
+
         return self.unormalized_log_prob(
-            **tf.nest.pack_sequence_as(
-                self.surrogate_sample,
-                x
-            ))
+                **{
+                    v: t for v, t in zip(self.var_list, x)
+                }
+            )
 
     @tf.function
     def unormalized_log_prob2(self, **x):

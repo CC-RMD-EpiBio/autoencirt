@@ -49,17 +49,16 @@ def main():
         grm.create_distributions()
 
         # Use ADVI to get us close
-        grm.calibrate_advi(100, initial_learning_rate=5e-2)
-        print(grm.calibrated_discriminations[0, ..., 0])
-        grm.calibrate_advi(100, initial_learning_rate=1e-3)
-        print(grm.calibrated_discriminations[0, ..., 0])
+        grm.calibrate_advi(50, initial_learning_rate=5e-2)
+        print(grm.calibrated_expectations['discriminations'][0, ..., 0])
 
         grm.score(data.iloc[test_index, :].to_numpy())
+
         # MCMC sample from here
         grm.calibrate_mcmc(
             step_size=1e-1,
-            num_steps=5000,
-            burnin=3000,
+            num_steps=10000,
+            burnin=8000,
             nuts=False)
 
         test_data_tensor = tf.cast(
