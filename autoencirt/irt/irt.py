@@ -105,7 +105,8 @@ class IRTModel(object):
             return -ability_distribution.log_prob(dnn_fun(self.response_data))
 
     def calibrate_mcmc(self, init_state=None, step_size=1e-3,
-                       num_steps=1000, burnin=500, nuts=True):
+                       num_steps=1000, burnin=500, nuts=True,
+                       num_leapfrog_steps=5):
         """Calibrate using HMC/NUT
 
         Keyword Arguments:
@@ -125,6 +126,7 @@ class IRTModel(object):
             unconstraining_bijectors=bijectors,
             num_steps=num_steps,
             burnin=burnin,
+            num_leapfrog_steps=num_leapfrog_steps,
             nuts=nuts
         )
         self.surrogate_sample = tf.nest.pack_sequence_as(

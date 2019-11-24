@@ -519,12 +519,15 @@ class GRModel(IRTModel):
 
         response_probs = tf.reduce_mean(response_probs, axis=-4)
 
-        response_rv = tfd.Categorical(response_probs)
+        response_rv = tfd.Independent(
+            tfd.Categorical(response_probs),
+            reinterpreted_batch_ndims=1
+        )
         lp = response_rv.log_prob(responses)
-        l_w = lp - sample_log_p[:, tf.newaxis, tf.newaxis]
-        l_w = l_w - tf.reduce_max(l_w)
-        l_w = tf.reduce_sum(l_w, -1)
-        w = tf.math.exp(l_w)/tf.reduce_sum(tf.math.exp(l_w), axis=0)
+        l_w = lp - sample_log_p[:, tf.newaxis]
+        l_w = l_w - tf.reduce_max(l_w, axis=0, keepdims=True)
+        w = tf.math.exp(l_w)/tf.reduce_sum(
+            tf.math.exp(l_w), axis=0, keepdims=True)
         mean = tf.reduce_sum(
             w[..., tf.newaxis]*trait_samples[:, tf.newaxis, :, 0, 0],
             axis=0)
