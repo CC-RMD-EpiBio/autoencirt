@@ -247,3 +247,11 @@ class IRTModel(object):
                 responses=self.calibration_data,
                 **x
             )
+
+    def out_numpy(self):
+        out = {k: v.numpy() for k, v in self.surrogate_sample.items()}
+        return out
+
+    def in_numpy(self, dict_of_numpy):
+        for k, v in dict_of_numpy.items():
+            self.surrogate_sample[k] = tf.cast(v, tf.float32)

@@ -118,6 +118,19 @@ class DenseHorseshoe(Dense):
         super().set_weights(weights)
         self.assemble_distributions()
 
+    def log_prob(self, x):
+        return self.distribution.log_prob(x)
+
+    def sample_weights(self, *args, **kwargs):
+        return self.distribution.sample(*args, **kwargs)
+
+    def assemble_networks(self, sample, activation=tf.nn.relu):
+        weight_tensors = []
+        for j in range(int(len(self.weights)/2)):
+            weight_tensors += [sample["w_"+str(j)]] + [sample["b_"+str(j)]]
+        net = self.build_network(weight_tensors, activation=activation)
+        return net
+
     def assemble_distributions(self):
         distribution_dict = {}
         bijectors = {}
@@ -139,11 +152,11 @@ class DenseHorseshoe(Dense):
             )
             bijectors['w_' + str(j)] = tfp.bijectors.Identity()
             bijectors['b_' + str(j)] = tfp.bijectors.Identity()
+            bijectors['tau_w_{0}'.format(j)] = tfp.bijectors.Softplus()
+            bijectors['lambda_w_{0}'.format(j)] = tfp.bijectors.Softplus()
+            bijectors['tau_b_{0}'.format(j)] = tfp.bijectors.Softplus()
+            bijectors['lambda_b_{0}'.format(j)] = tfp.bijectors.Softplus()
             if not self.reparameterized:
-                bijectors['tau_w_{0}'.format(j)] = tfp.bijectors.Softplus()
-                bijectors['lambda_w_{0}'.format(j)] = tfp.bijectors.Softplus()
-                bijectors['tau_b_{0}'.format(j)] = tfp.bijectors.Softplus()
-                bijectors['lambda_b_{0}'.format(j)] = tfp.bijectors.Softplus()
                 distribution_dict[
                     'tau_w_{0}'.format(j)
                 ] = eval(
@@ -181,6 +194,10 @@ class DenseHorseshoe(Dense):
                     )
                 )
             else:
+                bijectors['tau_w_{0}_a'.format(j)] = tfp.bijectors.Softplus()
+                bijectors['lambda_w_{0}_a'.format(j)] = tfp.bijectors.Softplus()
+                bijectors['tau_b_{0}_a'.format(j)] = tfp.bijectors.Softplus()
+                bijectors['lambda_b_{0}_a'.format(j)] = tfp.bijectors.Softplus()
                 distribution_dict[
                     'lambda_b_{0}'.format(j)
                 ] = eval(
