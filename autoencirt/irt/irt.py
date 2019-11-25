@@ -1,6 +1,11 @@
 import inspect
 from itertools import product
 
+from factor_analyzer import (
+    ConfirmatoryFactorAnalyzer,
+    FactorAnalyzer,
+    ModelSpecificationParser)
+
 import tensorflow as tf
 import numpy as np
 from autoencirt.nn import Dense, DenseHorseshoe
@@ -34,17 +39,24 @@ class IRTModel(object):
     surrogate_sample = None
     scoring_grid = None  # D dimensional
     grid = None
+    fa = None
+    factor_loadings = None
 
     scoring_network = None
 
-    def __init__(self):
+    def __init__(self, dim=1, decay=0.25):
         self.set_dimension(1)
         self.var_list = inspect.getfullargspec(
             self.joint_log_prob).args[2:]
+        self.set_dimension(dim, decay)
 
     def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim
         self.dimensional_decay = decay
+        self.xi_scale *= (decay**tf.cast(
+            tf.range(dim), tf.float32)
+        )[tf.newaxis, :, tf.newaxis, tf.newaxis]
+        self.fa = FactorAnalyzer(n_factors=dim)
 
     def set_params_from_samples(self, samples):
         try:
@@ -59,10 +71,13 @@ class IRTModel(object):
         self.response_data = response_data
         self.num_people = response_data.shape[0]
         self.num_items = response_data.shape[1]
+        self.fa.fit(response_data)
+        self.factor_loadings = self.fa.loadings_
         self.response_cardinality = int(max(response_data.max())) + 1
         if int(min(response_data.min())) == 1:
             print("Warning: responses do not appear to be from zero")
         self.calibration_data = tf.cast(response_data.to_numpy(), tf.int32)
+        
 
     def create_distributions(self):
         pass
@@ -162,7 +177,7 @@ class IRTModel(object):
         if opt is None:
             opt = tf.optimizers.Adam(
                 learning_rate=learning_rate)
-                
+
         @tf.function
         def run_approximation(num_steps):
             losses = tfp.vi.fit_surrogate_posterior(

@@ -45,17 +45,29 @@ def main():
     for train_index, test_index in kf.split(data):
         grm = GRModel(
             auxiliary_parameterization=True,
-            xi_scale=1e-2)
+            xi_scale=1e-2,
+            eta_scale=1e-1,
+            kappa_scale=1e-1,
+            weight_exponent=1
+            )
         grm.set_dimension(2)
         grm.load_data(data.iloc[train_index, :])
         grm.create_distributions()
 
+        discriminations = []
+        losses = []
         # Use ADVI to get us close
-        for _ in range(2):
-            losses = grm.calibrate_advi(50, initial_learning_rate=1e-2)
-            print(losses)
-        print(grm.calibrated_expectations['discriminations'][0, ..., 0])
+        for _ in range(50):
+            losses+= [grm.calibrate_advi(30, initial_learning_rate=5e-3).numpy()]
+            print(losses[-1])
+            discriminations+= [grm.calibrated_expectations['discriminations'][0, ..., 0].numpy()]
+            print(discriminations[-1])
 
+        for _ in range(50):
+            losses+= [grm.calibrate_advi(25, initial_learning_rate=1e-3).numpy()]
+            print(losses[-1])
+            discriminations+= [grm.calibrated_expectations['discriminations'][0, ..., 0].numpy()]
+            print(discriminations[-1])
         grm.score(data.iloc[test_index, :].to_numpy())
 
         # MCMC sample from here

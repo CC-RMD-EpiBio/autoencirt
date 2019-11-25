@@ -12,6 +12,11 @@ from autoencirt.tools.tf import (
 )
 
 
+from factor_analyzer import (
+    ConfirmatoryFactorAnalyzer,
+    FactorAnalyzer,
+    ModelSpecificationParser)
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability.python import util as tfp_util
@@ -39,6 +44,10 @@ class GRModel(IRTModel):
     """
     response_type = "polytomous"
     weight_exponent = 1.0
+    xi_scale = .1
+    kappa_scale = .1
+    eta_scale = .1
+    fa = None
 
     def __init__(
             self,
@@ -46,8 +55,10 @@ class GRModel(IRTModel):
             xi_scale=1e-2,
             eta_scale=1e-2,
             kappa_scale=1e-2,
-            weight_exponent=1.0):
-        super().__init__()
+            weight_exponent=1.0,
+            dim=2,
+            decay=.25):
+        super().__init__(dim, decay)
         self.auxiliary_parameterization = auxiliary_parameterization
         if auxiliary_parameterization:
             self.var_list = inspect.getfullargspec(
@@ -192,7 +203,7 @@ class GRModel(IRTModel):
                                   ddifficulties, abilities, xi, eta,
                                   kappa, xi_a, eta_a, kappa_a, mu):
         rv_discriminations = tfd.Independent(
-            tfd.HalfNormal(scale=eta*xi),
+            tfd.HalfNormal(scale=eta*xi*kappa),
             reinterpreted_batch_ndims=4)
         rv_difficulties0 = tfd.Independent(
             tfd.Normal(loc=mu, scale=1.),
@@ -356,7 +367,10 @@ class GRModel(IRTModel):
             ),
             'discriminations': self.bijectors['discriminations'](
                 build_trainable_normal_dist(
-                    0.25*tf.ones((1, self.dimensions, self.num_items, 1)),
+                    tf.cast(
+                        (1.+np.abs(self.factor_loadings.T)),
+                        np.float32)[tf.newaxis, ..., tf.newaxis],
+                    # tf.ones((1, self.dimensions, self.num_items, 1)),
                     1e-1*tf.ones((1, self.dimensions, self.num_items, 1)),
                     4
                 )
