@@ -140,12 +140,11 @@ class IRTModel(object):
 
     def unormalized_log_prob_list(self, *x):
         return self.unormalized_log_prob(
-                **{
-                    v: t for v, t in zip(self.var_list, x)
-                }
-            )
+            **{
+                v: t for v, t in zip(self.var_list, x)
+            }
+        )
 
-    @tf.function
     def unormalized_log_prob2(self, **x):
         x['x'] = self.calibration_data
         return self.weighted_likelihood.log_prob(x)
@@ -163,7 +162,7 @@ class IRTModel(object):
         if opt is None:
             opt = tf.optimizers.Adam(
                 learning_rate=learning_rate)
-
+                
         @tf.function
         def run_approximation(num_steps):
             losses = tfp.vi.fit_surrogate_posterior(
@@ -176,7 +175,8 @@ class IRTModel(object):
             return(losses)
 
         losses = run_approximation(num_steps)
-        self.set_calibration_expectations()
+        if (not np.isnan(losses[-1])) and (not np.isinf(losses[-1])):
+            self.set_calibration_expectations()
         return(losses)
 
     def set_calibration_expectations(self):
@@ -194,43 +194,41 @@ class IRTModel(object):
 
     def simulate_data(self, shape, sparsity=0.5):
         sampling_rv = tfd.Independent(
-                    tfd.Normal(
-                        loc=tf.reduce_mean(
-                            self.calibrated_expectations['abilities'],
-                            axis=0),
-                        scale=tf.math.reduce_std(
-                            self.calibrated_expectations['abilities'],
-                            axis=0)
-                    ),
-                    reinterpreted_batch_ndims=2
-                )
+            tfd.Normal(
+                loc=tf.reduce_mean(
+                    self.calibrated_expectations['abilities'],
+                    axis=0),
+                scale=tf.math.reduce_std(
+                    self.calibrated_expectations['abilities'],
+                    axis=0)
+            ),
+            reinterpreted_batch_ndims=2
+        )
         trait_samples = sampling_rv.sample(shape)
         discrimination = self.calibrated_expectations['discriminations']
         rv = tfd.Bernoulli(tf.ones_like(discrimination)*(1.0-sparsity))
         discrimination = discrimination*tf.cast(rv.sample(), tf.float32)
         probs = self.grm_model_prob_d(
-                self.calibrated_expectations['abilities'],
-                discrimination,
-                self.calibrated_expectations['difficulties0'],
-                self.calibrated_expectations['ddifficulties']
-            )
+            self.calibrated_expectations['abilities'],
+            discrimination,
+            self.calibrated_expectations['difficulties0'],
+            self.calibrated_expectations['ddifficulties']
+        )
         response_rv = tfd.Categorical(
             probs=probs
         )
         responses = response_rv.sample()
         return responses, discrimination, trait_samples
 
-    @tf.function
     def unormalized_log_prob(self, **x):
         if self.auxiliary_parameterization:
             return self.joint_log_prob_auxiliary(
                 responses=self.calibration_data,
                 **x
-                
+
             )
         else:
             return self.joint_log_prob(
                 responses=self.calibration_data,
                 **x
             )
-

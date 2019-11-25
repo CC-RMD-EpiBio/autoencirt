@@ -38,8 +38,8 @@ def grm_model_prob(abilities, discriminations, difficulties):
     # \begin{align}
     #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
     # \end{align}
-    weights = discriminations / \
-        tf.reduce_sum(discriminations, axis=0)[tf.newaxis, :]
+    weights = discriminations**2 / \
+        tf.reduce_sum(discriminations, axis=0)[tf.newaxis, :]**2
     probs = tf.reduce_sum(probs*weights[tf.newaxis, :, :, tf.newaxis], axis=1)
     return probs
 
