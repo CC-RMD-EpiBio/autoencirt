@@ -124,7 +124,7 @@ class GRModel(IRTModel):
     def log_likelihood(self, responses, discriminations,
                        difficulties, abilities):
         rv_responses = tfd.Categorical(
-            self.grm_model_prob(
+            probs=self.grm_model_prob(
                 abilities, discriminations, difficulties))
 
         return rv_responses.log_prob(responses)
@@ -288,7 +288,7 @@ class GRModel(IRTModel):
             x=lambda abilities, discriminations, difficulties0, ddifficulties:
             tfd.Independent(
                 tfd.Categorical(
-                    self.grm_model_prob_d(
+                    probs=self.grm_model_prob_d(
                         abilities,
                         discriminations,
                         difficulties0,
@@ -509,7 +509,8 @@ class GRModel(IRTModel):
         response_probs = tf.reduce_mean(response_probs, axis=-4)
 
         response_rv = tfd.Independent(
-            tfd.Categorical(response_probs),
+            tfd.Categorical(
+                probs=response_probs),
             reinterpreted_batch_ndims=1
         )
         lp = response_rv.log_prob(responses)

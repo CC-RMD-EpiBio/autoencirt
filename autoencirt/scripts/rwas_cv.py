@@ -49,7 +49,7 @@ def main():
         grm.create_distributions()
 
         # Use ADVI to get us close
-        losses = grm.calibrate_advi(100, initial_learning_rate=5e-2
+        losses = grm.calibrate_advi(100, initial_learning_rate=5e-2)
         print(losses)
         print(grm.calibrated_expectations['discriminations'][0, ..., 0])
 

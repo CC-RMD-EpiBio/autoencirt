@@ -14,6 +14,8 @@ from autoencirt.tools.tf import (
     build_trainable_normal_dist
 )
 
+tfd = tfp.distributions
+
 
 class IRTModel(object):
     response_type = None
@@ -189,6 +191,34 @@ class IRTModel(object):
             k: tf.math.reduce_std(v, axis=0)
             for k, v in self.surrogate_sample.items()
         }
+
+    def simulate_data(self, shape, sparsity=0.5):
+        sampling_rv = tfd.Independent(
+                    tfd.Normal(
+                        loc=tf.reduce_mean(
+                            self.calibrated_expectations['abilities'],
+                            axis=0),
+                        scale=tf.math.reduce_std(
+                            self.calibrated_expectations['abilities'],
+                            axis=0)
+                    ),
+                    reinterpreted_batch_ndims=2
+                )
+        trait_samples = sampling_rv.sample(shape)
+        discrimination = self.calibrated_expectations['discriminations']
+        rv = tfd.Bernoulli(tf.ones_like(discrimination)*(1.0-sparsity))
+        discrimination = discrimination*tf.cast(rv.sample(), tf.float32)
+        probs = self.grm_model_prob_d(
+                self.calibrated_expectations['abilities'],
+                discrimination,
+                self.calibrated_expectations['difficulties0'],
+                self.calibrated_expectations['ddifficulties']
+            )
+        response_rv = tfd.Categorical(
+            probs=probs
+        )
+        responses = response_rv.sample()
+        return responses, discrimination, trait_samples
 
     @tf.function
     def unormalized_log_prob(self, **x):
