@@ -123,7 +123,7 @@ class IRTModel(object):
 
     def calibrate_mcmc(self, init_state=None, step_size=1e-1,
                        num_steps=1000, burnin=500, nuts=True,
-                       num_leapfrog_steps=5):
+                       num_leapfrog_steps=5, clip=False):
         """Calibrate using HMC/NUT
 
         Keyword Arguments:

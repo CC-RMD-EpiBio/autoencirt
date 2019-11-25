@@ -1,7 +1,45 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+from autoencirt.tools.tf import SqrtInverseGamma
+
 tfd = tfp.distributions
+
+weight_code = """ lambda lambda_{0}_{1}, tau_{0}_{1}: tfd.Independent(
+    tfd.Normal(
+        loc=tf.zeros({3}),
+        scale=lambda_{0}_{1}*tau_{0}_{1}
+    ),
+    reinterpreted_batch_ndims={2}
+)
+"""
+
+cauchy_code = """ tfd.Independent(
+    tfd.HalfCauchy(
+        loc=tf.zeros({0}),
+        scale={1}*tf.ones({0})
+    ),
+    reinterpreted_batch_ndims={2}
+)
+"""
+
+sq_igamma_code = """ lambda {1}: tfd.Independent(
+    SqrtInverseGamma(
+        concentration=0.5*tf.ones({0}),
+        scale=1.0/{1}
+    ),
+    reinterpreted_batch_ndims={2}
+)
+"""
+
+igamma_code = """ tfd.Independent(
+    tfd.InverseGamma(
+        concentration=0.5*tf.ones({0}),
+        scale={1}*tf.ones({0})
+    ),
+    reinterpreted_batch_ndims={2}
+)
+"""
 
 
 class Dense(object):
@@ -64,24 +102,177 @@ class DenseHorseshoe(Dense):
     Arguments:
         DenseNetwork {[type]} -- [description]
     """
-    weight_distributions = None
-    surrogate_density = None
-    reparameterized = False
+    distribution = None
+    surrogate_distribution = None
+    reparameterized = True
 
     def __init__(self, input_size=None, layer_sizes=None,
-                 reparameterized=False, *args, **kwargs):
-        super().__init__(input_size, layer_sizes)
-        self.assemble_distribution()
+                 reparameterized=False, decay=0.5, *args, **kwargs):
+        super().__init__(input_size, layer_sizes, *args, **kwargs)
+        self.layer_sizes = [input_size] + layer_sizes
         self.reparameterized = reparameterized
+        self.assemble_distributions()
+        self.decay = decay  # dimensional decay
 
     def set_weights(self, weights):
         super().set_weights(weights)
-        self.assemble_distribution()
+        self.assemble_distributions()
 
-    def assemble_distribution(self):
-        w_dict = {
-            "W" + str(w): tfd.Normal()}
+    def assemble_distributions(self):
+        distribution_dict = {}
+        bijectors = {}
+        for j, weight in enumerate(self.weights[::2]):
+            distribution_dict['w_' + str(j)] = eval(
+                weight_code.format(
+                    'w',
+                    j,
+                    2,
+                    (self.layer_sizes[j],
+                     self.layer_sizes[j+1])))
+            distribution_dict['b_' + str(j)] = eval(
+                weight_code.format(
+                    'b',
+                    j,
+                    1,
+                    (self.layer_sizes[j+1],)
+                )
+            )
+            bijectors['w_' + str(j)] = tfp.bijectors.Identity()
+            bijectors['b_' + str(j)] = tfp.bijectors.Identity()
+            if not self.reparameterized:
+                bijectors['tau_w_{0}'.format(j)] = tfp.bijectors.Softplus()
+                bijectors['lambda_w_{0}'.format(j)] = tfp.bijectors.Softplus()
+                bijectors['tau_b_{0}'.format(j)] = tfp.bijectors.Softplus()
+                bijectors['lambda_b_{0}'.format(j)] = tfp.bijectors.Softplus()
+                distribution_dict[
+                    'tau_w_{0}'.format(j)
+                ] = eval(
+                    cauchy_code.format(
+                        (1, self.layer_sizes[j+1]),
+                        1.,
+                        2
+                    )
+                )
+                distribution_dict[
+                    'tau_b_{0}'.format(j)
+                ] = eval(
+                    cauchy_code.format(
+                        1,
+                        1.,
+                        1
+                    )
+                )
+                distribution_dict[
+                    'lambda_b_{0}'.format(j)
+                ] = eval(
+                    cauchy_code.format(
+                        (self.layer_sizes[j+1],),
+                        1.,
+                        1
+                    )
+                )
+                distribution_dict[
+                    'lambda_w_{0}'.format(j)
+                ] = eval(
+                    cauchy_code.format(
+                        (self.layer_sizes[j], self.layer_sizes[j+1]),
+                        1.,
+                        2
+                    )
+                )
+            else:
+                distribution_dict[
+                    'lambda_b_{0}'.format(j)
+                ] = eval(
+                    sq_igamma_code.format(
+                        (self.layer_sizes[j+1],),
+                        'lambda_b_{0}_a'.format(j),
+                        1
+                    )
+                )
+
+                distribution_dict[
+                    'lambda_b_{0}_a'.format(j)
+                ] = eval(
+                    igamma_code.format(
+                        (self.layer_sizes[j+1],),
+                        1.0,
+                        1
+                    )
+                )
+
+                distribution_dict[
+                    'lambda_w_{0}'.format(j)
+                ] = eval(
+                    sq_igamma_code.format(
+                        (self.layer_sizes[j], self.layer_sizes[j+1]),
+                        'lambda_w_{0}_a'.format(j),
+                        2
+                    )
+                )
+
+                distribution_dict[
+                    'lambda_w_{0}_a'.format(j)
+                ] = eval(
+                    igamma_code.format(
+                        (self.layer_sizes[j], self.layer_sizes[j+1]),
+                        1.,
+                        2
+                    )
+                )
+
+                distribution_dict[
+                    'tau_w_{0}'.format(j)
+                ] = eval(
+                    sq_igamma_code.format(
+                        (1, self.layer_sizes[j+1]),
+                        'tau_w_{0}_a'.format(j),
+                        2
+                    )
+                )
+                distribution_dict[
+                    'tau_w_{0}_a'.format(j)
+                ] = eval(
+                    igamma_code.format(
+                        (1, self.layer_sizes[j+1]),
+                        1.,
+                        2
+                    )
+                )
+                distribution_dict[
+                    'tau_b_{0}'.format(j)
+                ] = eval(
+                    sq_igamma_code.format(
+                        1,
+                        'tau_b_{0}_a'.format(j),
+                        1
+                    )
+                )
+
+                distribution_dict[
+                    'tau_b_{0}_a'.format(j)
+                ] = eval(
+                    igamma_code.format(
+                        1,
+                        1.,
+                        1
+                    )
+                )
+        self.bijectors = bijectors
+        self.distribution = tfd.JointDistributionNamed(distribution_dict)
 
 
 class DenseHorseshoeAE(DenseHorseshoe):
     pass
+
+
+def main():
+    dense = Dense(10, [20, 12, 2])
+    denseH = DenseHorseshoe(10, [20, 12, 2],
+                            reparameterized=True)
+    sample = denseH.distribution.sample()
+    return
+
+
+if __name__ == "__main__":
+    main()

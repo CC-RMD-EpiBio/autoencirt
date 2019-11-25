@@ -506,7 +506,7 @@ class GRModel(IRTModel):
 
             def f(eta, xi, kappa):
                 return tfd.Independent(
-                    tfd.HalfNormal(scale=tf.sqrt(eta*xi*kappa)),
+                    tfd.HalfNormal(scale=eta*xi*kappa),
                     reinterpreted_batch_ndims=4
                 )
             grm_joint_distribution_dict["discriminations"] = f

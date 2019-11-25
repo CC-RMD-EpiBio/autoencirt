@@ -8,10 +8,67 @@ from tensorflow_probability.python.experimental.vi.surrogate_posteriors import(
     build_trainable_location_scale_distribution
 )
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
-
+from tensorflow_probability.python.distributions.transformed_distribution import (
+    TransformedDistribution
+)
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
+
+
+class SqrtCauchy(TransformedDistribution):
+    def __init__(self, loc, scale, validate_args=False,
+                 allow_nan_stats=True, name="SqrtCauchy"):
+        parameters = dict(locals())
+        with tf.name_scope(name) as name:
+            super(SqrtCauchy, self).__init__(
+                distribution=tfd.HalfCauchy(loc=loc, scale=scale),
+                bijector=tfb.Invert(tfb.Square()),
+                validate_args=validate_args,
+                parameters=parameters,
+                name=name)
+
+    @classmethod
+    def _params_event_ndims(cls):
+        return dict(loc=0, scale=0)
+
+    @property
+    def loc(self):
+        """Distribution parameter for the pre-transformed mean."""
+        return self.distribution.loc
+
+    @property
+    def scale(self):
+        """Distribution parameter for the pre-transformed standard deviation."""
+        return self.distribution.scale
+
+
+class SqrtInverseGamma(TransformedDistribution):
+    def __init__(self, concentration, scale, validate_args=False,
+                 allow_nan_stats=True, name="SqrtInverseGamma"):
+        parameters = dict(locals())
+        with tf.name_scope(name) as name:
+            super(SqrtInverseGamma, self).__init__(
+                distribution=tfd.InverseGamma(
+                    concentration=concentration, scale=scale),
+                bijector=tfb.Invert(tfb.Square()),
+                validate_args=validate_args,
+                parameters=parameters,
+                name=name)
+
+    @classmethod
+    def _params_event_ndims(cls):
+        return dict(loc=0, scale=0)
+
+    @property
+    def loc(self):
+        """Distribution parameter for the pre-transformed mean."""
+        return self.distribution.loc
+
+    @property
+    def scale(self):
+        """Distribution parameter for the pre-transformed standard deviation."""
+        return self.distribution.scale
 
 
 def clip_gradients(fn, clip_value):
