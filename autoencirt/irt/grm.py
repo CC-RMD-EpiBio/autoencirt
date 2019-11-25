@@ -129,7 +129,7 @@ class GRModel(IRTModel):
             )
             + self.joint_log_prior_auxiliary(
                 discriminations, difficulties0,
-                ddifficulties, abilities, xi, eta, kappa
+                ddifficulties, abilities, xi, eta, kappa,
                 xi_a, eta_a, kappa_a, mu))
 
     def log_likelihood(self, responses, discriminations,
