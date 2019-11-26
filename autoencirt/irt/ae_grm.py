@@ -1,3 +1,5 @@
+import numpy as np
+
 from autoencirt.irt.grm import GRModel
 from autoencirt.nn import DenseHorseshoe
 
