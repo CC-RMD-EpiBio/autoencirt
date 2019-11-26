@@ -1,7 +1,13 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from autoencirt.tools.tf import SqrtInverseGamma
+
+from autoencirt.tools.tf import (
+    clip_gradients, run_chain, SqrtInverseGamma,
+    build_trainable_InverseGamma_dist,
+    build_trainable_normal_dist
+)
+
 
 tfd = tfp.distributions
 
@@ -133,6 +139,7 @@ class DenseHorseshoe(Dense):
 
     def assemble_distributions(self):
         distribution_dict = {}
+        factorized_dict = {}
         bijectors = {}
         for j, weight in enumerate(self.weights[::2]):
             distribution_dict['w_' + str(j)] = eval(
@@ -142,6 +149,11 @@ class DenseHorseshoe(Dense):
                     2,
                     (self.layer_sizes[j],
                      self.layer_sizes[j+1])))
+            factorized_dict['w_' + str(j)] = build_trainable_normal_dist(
+                tf.zeros((self.layer_sizes[j], self.layer_sizes[j+1])),
+                1e-2*tf.zeros((self.layer_sizes[j], self.layer_sizes[j+1])),
+                2
+            )
             distribution_dict['b_' + str(j)] = eval(
                 weight_code.format(
                     'b',
@@ -149,6 +161,11 @@ class DenseHorseshoe(Dense):
                     1,
                     (self.layer_sizes[j+1],)
                 )
+            )
+            factorized_dict['b_' + str(j)] = build_trainable_normal_dist(
+                tf.zeros((self.layer_sizes[j+1],)),
+                1e-2*tf.zeros((self.layer_sizes[j+1],)),
+                1
             )
             bijectors['w_' + str(j)] = tfp.bijectors.Identity()
             bijectors['b_' + str(j)] = tfp.bijectors.Identity()
@@ -166,6 +183,15 @@ class DenseHorseshoe(Dense):
                         2
                     )
                 )
+                factorized_dict[
+                    'tau_w_{0}'.format(j)
+                ] = bijectors['tau_w_{0}'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((1, self.layer_sizes[j+1])),
+                        tf.ones((1, self.layer_sizes[j+1])),
+                        1
+                    )
+                )
                 distribution_dict[
                     'tau_b_{0}'.format(j)
                 ] = eval(
@@ -175,12 +201,30 @@ class DenseHorseshoe(Dense):
                         1
                     )
                 )
+                factorized_dict[
+                    'tau_b_{0}'.format(j)
+                ] = bijectors['tau_b_{0}'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((1)),
+                        tf.ones((1)),
+                        1
+                    )
+                )
                 distribution_dict[
                     'lambda_b_{0}'.format(j)
                 ] = eval(
                     cauchy_code.format(
                         (self.layer_sizes[j+1],),
                         1.,
+                        1
+                    )
+                )
+                factorized_dict[
+                    'lambda_b_{0}'.format(j)
+                ] = bijectors['lambda_b_{0}'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((self.layer_sizes[j+1],)),
+                        tf.ones((self.layer_sizes[j+1],)),
                         1
                     )
                 )
@@ -193,17 +237,43 @@ class DenseHorseshoe(Dense):
                         2
                     )
                 )
+                factorized_dict[
+                    'lambda_w_{0}'.format(j)
+                ] = bijectors['lambda_w_{0}'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones(
+                            (self.layer_sizes[j], self.layer_sizes[j+1])),
+                        tf.ones(
+                            (self.layer_sizes[j], self.layer_sizes[j+1])),
+                        2
+                    )
+                )
             else:
                 bijectors['tau_w_{0}_a'.format(j)] = tfp.bijectors.Softplus()
-                bijectors['lambda_w_{0}_a'.format(j)] = tfp.bijectors.Softplus()
-                bijectors['tau_b_{0}_a'.format(j)] = tfp.bijectors.Softplus()
-                bijectors['lambda_b_{0}_a'.format(j)] = tfp.bijectors.Softplus()
+                bijectors[
+                    'lambda_w_{0}_a'.format(j)
+                    ] = tfp.bijectors.Softplus()
+                bijectors[
+                    'tau_b_{0}_a'.format(j)
+                    ] = tfp.bijectors.Softplus()
+                bijectors[
+                    'lambda_b_{0}_a'.format(j)
+                    ] = tfp.bijectors.Softplus()
                 distribution_dict[
                     'lambda_b_{0}'.format(j)
                 ] = eval(
                     sq_igamma_code.format(
                         (self.layer_sizes[j+1],),
                         'lambda_b_{0}_a'.format(j),
+                        1
+                    )
+                )
+                factorized_dict[
+                    'lambda_b_{0}'.format(j)
+                ] = bijectors['lambda_b_{0}'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((self.layer_sizes[j+1],)),
+                        tf.ones((self.layer_sizes[j+1],)),
                         1
                     )
                 )
@@ -214,6 +284,15 @@ class DenseHorseshoe(Dense):
                     igamma_code.format(
                         (self.layer_sizes[j+1],),
                         1.0,
+                        1
+                    )
+                )
+                factorized_dict[
+                    'lambda_b_{0}_a'.format(j)
+                ] = bijectors['lambda_b_{0}_a'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((self.layer_sizes[j+1],)),
+                        tf.ones((self.layer_sizes[j+1],)),
                         1
                     )
                 )
@@ -228,6 +307,15 @@ class DenseHorseshoe(Dense):
                     )
                 )
 
+                factorized_dict[
+                    'lambda_w_{0}'.format(j)
+                ] = bijectors['lambda_w_{0}'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((self.layer_sizes[j], self.layer_sizes[j+1])),
+                        tf.ones((self.layer_sizes[j], self.layer_sizes[j+1])),
+                        2
+                    )
+                )
                 distribution_dict[
                     'lambda_w_{0}_a'.format(j)
                 ] = eval(
@@ -237,7 +325,19 @@ class DenseHorseshoe(Dense):
                         2
                     )
                 )
-
+                factorized_dict[
+                    'lambda_w_{0}_a'.format(j)
+                ] = bijectors['lambda_w_{0}_a'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones(
+                            (self.layer_sizes[j], self.layer_sizes[j+1])
+                            ),
+                        tf.ones(
+                            (self.layer_sizes[j], self.layer_sizes[j+1])
+                            ),
+                        2
+                    )
+                )
                 distribution_dict[
                     'tau_w_{0}'.format(j)
                 ] = eval(
@@ -245,6 +345,15 @@ class DenseHorseshoe(Dense):
                         (1, self.layer_sizes[j+1]),
                         'tau_w_{0}_a'.format(j),
                         2
+                    )
+                )
+                factorized_dict[
+                    'tau_w_{0}'.format(j)
+                ] = bijectors['tau_w_{0}'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((1, self.layer_sizes[j+1])),
+                        tf.ones((1, self.layer_sizes[j+1])),
+                        1
                     )
                 )
                 distribution_dict[
@@ -256,6 +365,15 @@ class DenseHorseshoe(Dense):
                         2
                     )
                 )
+                factorized_dict[
+                    'tau_w_{0}_a'.format(j)
+                ] = bijectors['tau_w_{0}_a'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((1, self.layer_sizes[j+1])),
+                        tf.ones((1, self.layer_sizes[j+1])),
+                        1
+                    )
+                )
                 distribution_dict[
                     'tau_b_{0}'.format(j)
                 ] = eval(
@@ -265,7 +383,15 @@ class DenseHorseshoe(Dense):
                         1
                     )
                 )
-
+                factorized_dict[
+                    'tau_b_{0}'.format(j)
+                ] = bijectors['tau_b_{0}'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((1)),
+                        tf.ones((1)),
+                        1
+                    )
+                )
                 distribution_dict[
                     'tau_b_{0}_a'.format(j)
                 ] = eval(
@@ -275,8 +401,18 @@ class DenseHorseshoe(Dense):
                         1
                     )
                 )
+                factorized_dict[
+                    'tau_b_{0}_a'.format(j)
+                ] = bijectors['tau_b_{0}_a'.format(j)](
+                    build_trainable_InverseGamma_dist(
+                        0.5*tf.ones((1)),
+                        tf.ones((1)),
+                        1
+                    )
+                )
         self.bijectors = bijectors
         self.distribution = tfd.JointDistributionNamed(distribution_dict)
+        self.surrogate_distribution = tfd.JointDistributionNamed(factorized_dict)
 
 
 class DenseHorseshoeAE(DenseHorseshoe):
@@ -288,6 +424,7 @@ def main():
     denseH = DenseHorseshoe(10, [20, 12, 2],
                             reparameterized=True)
     sample = denseH.distribution.sample()
+    sample2 = denseH.surrogate_distribution.sample()
     return
 
 

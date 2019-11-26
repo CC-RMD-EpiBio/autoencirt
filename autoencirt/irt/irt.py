@@ -77,7 +77,6 @@ class IRTModel(object):
         if int(min(response_data.min())) == 1:
             print("Warning: responses do not appear to be from zero")
         self.calibration_data = tf.cast(response_data.to_numpy(), tf.int32)
-        
 
     def create_distributions(self):
         pass
@@ -123,7 +122,7 @@ class IRTModel(object):
 
     def calibrate_mcmc(self, init_state=None, step_size=1e-1,
                        num_steps=1000, burnin=500, nuts=True,
-                       num_leapfrog_steps=5, clip=False):
+                       num_leapfrog_steps=5, clip=None):
         """Calibrate using HMC/NUT
 
         Keyword Arguments:
@@ -139,7 +138,9 @@ class IRTModel(object):
         samples, sampler_stat = run_chain(
             init_state=initial_list,
             step_size=step_size,
-            target_log_prob_fn=self.unormalized_log_prob_list,
+            target_log_prob_fn=(
+                self.unormalized_log_prob_list if clip is None
+                else clip_gradients(self.unormalized_log_prob_list, clip)),
             unconstraining_bijectors=bijectors,
             num_steps=num_steps,
             burnin=burnin,
@@ -167,7 +168,7 @@ class IRTModel(object):
     def calibrate_advi(
             self, num_steps=10, initial_learning_rate=5e-3,
             decay_rate=0.99, learning_rate=None,
-            opt=None):
+            opt=None, clip=None):
         if learning_rate is None:
             learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
                 initial_learning_rate=initial_learning_rate,
@@ -181,7 +182,9 @@ class IRTModel(object):
         @tf.function
         def run_approximation(num_steps):
             losses = tfp.vi.fit_surrogate_posterior(
-                target_log_prob_fn=self.unormalized_log_prob,
+                target_log_prob_fn=(
+                    self.unormalized_log_prob if clip is None
+                    else clip_gradients(self.unormalized_log_prob, clip)),
                 surrogate_posterior=self.surrogate_posterior,
                 optimizer=opt,
                 num_steps=num_steps,

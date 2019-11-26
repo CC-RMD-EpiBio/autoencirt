@@ -12,6 +12,7 @@ from tensorflow_probability.python.distributions.transformed_distribution import
     TransformedDistribution
 )
 
+
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
