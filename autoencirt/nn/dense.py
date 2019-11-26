@@ -426,6 +426,7 @@ class DenseHorseshoe(Dense):
         self.distribution = tfd.JointDistributionNamed(distribution_dict)
         self.surrogate_distribution = tfd.JointDistributionNamed(
             factorized_dict)
+        self.surrogate_distribution_dict = factorized_dict
         self.var_list = var_list
         self.weight_var_list = weight_var_list
 

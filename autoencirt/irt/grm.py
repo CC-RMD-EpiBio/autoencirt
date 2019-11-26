@@ -539,6 +539,7 @@ class GRModel(IRTModel):
                     reinterpreted_batch_ndims=4
                 )
             grm_joint_distribution_dict["discriminations"] = f
+        self.surrogate_distribution_dict = surrogate_distribution_dict
 
         return (tfd.JointDistributionNamed(grm_joint_distribution_dict),
                 tfd.JointDistributionNamed(surrogate_distribution_dict))
