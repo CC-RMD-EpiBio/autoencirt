@@ -61,7 +61,7 @@ class Dense(object):
             self.fn = self.build_network(self.weights)
 
     def dense(self, X, W, b, activation):
-        return activation(tf.matmul(X, W) + b)
+        return activation(tf.matmul(X, W) + b[..., tf.newaxis, :])
 
     def set_weights(self, weights):
         self.weights = weights
@@ -141,7 +141,11 @@ class DenseHorseshoe(Dense):
         distribution_dict = {}
         factorized_dict = {}
         bijectors = {}
+        var_list = []
+        weight_var_list = []
         for j, weight in enumerate(self.weights[::2]):
+            var_list += ['w_' + str(j)] + ['b_' + str(j)]
+            weight_var_list += ['w_' + str(j)] + ['b_' + str(j)]
             distribution_dict['w_' + str(j)] = eval(
                 weight_code.format(
                     'w',
@@ -169,6 +173,10 @@ class DenseHorseshoe(Dense):
             )
             bijectors['w_' + str(j)] = tfp.bijectors.Identity()
             bijectors['b_' + str(j)] = tfp.bijectors.Identity()
+
+            var_list += (
+                ['tau_w_{0}'.format(j)] + ['lambda_w_{0}'.format(j)]
+                + ['tau_b_{0}'.format(j)] + ['lambda_b_{0}'.format(j)])
             bijectors['tau_w_{0}'.format(j)] = tfp.bijectors.Softplus()
             bijectors['lambda_w_{0}'.format(j)] = tfp.bijectors.Softplus()
             bijectors['tau_b_{0}'.format(j)] = tfp.bijectors.Softplus()
@@ -249,16 +257,19 @@ class DenseHorseshoe(Dense):
                     )
                 )
             else:
+                var_list += (
+                    ['tau_w_{0}_a'.format(j)] + ['lambda_w_{0}_a'.format(j)]
+                    + ['tau_b_{0}_a'.format(j)] + ['lambda_b_{0}_a'.format(j)])
                 bijectors['tau_w_{0}_a'.format(j)] = tfp.bijectors.Softplus()
                 bijectors[
                     'lambda_w_{0}_a'.format(j)
-                    ] = tfp.bijectors.Softplus()
+                ] = tfp.bijectors.Softplus()
                 bijectors[
                     'tau_b_{0}_a'.format(j)
-                    ] = tfp.bijectors.Softplus()
+                ] = tfp.bijectors.Softplus()
                 bijectors[
                     'lambda_b_{0}_a'.format(j)
-                    ] = tfp.bijectors.Softplus()
+                ] = tfp.bijectors.Softplus()
                 distribution_dict[
                     'lambda_b_{0}'.format(j)
                 ] = eval(
@@ -311,7 +322,8 @@ class DenseHorseshoe(Dense):
                     'lambda_w_{0}'.format(j)
                 ] = bijectors['lambda_w_{0}'.format(j)](
                     build_trainable_InverseGamma_dist(
-                        0.5*tf.ones((self.layer_sizes[j], self.layer_sizes[j+1])),
+                        0.5 *
+                        tf.ones((self.layer_sizes[j], self.layer_sizes[j+1])),
                         tf.ones((self.layer_sizes[j], self.layer_sizes[j+1])),
                         2
                     )
@@ -331,10 +343,10 @@ class DenseHorseshoe(Dense):
                     build_trainable_InverseGamma_dist(
                         0.5*tf.ones(
                             (self.layer_sizes[j], self.layer_sizes[j+1])
-                            ),
+                        ),
                         tf.ones(
                             (self.layer_sizes[j], self.layer_sizes[j+1])
-                            ),
+                        ),
                         2
                     )
                 )
@@ -412,7 +424,13 @@ class DenseHorseshoe(Dense):
                 )
         self.bijectors = bijectors
         self.distribution = tfd.JointDistributionNamed(distribution_dict)
-        self.surrogate_distribution = tfd.JointDistributionNamed(factorized_dict)
+        self.surrogate_distribution = tfd.JointDistributionNamed(
+            factorized_dict)
+        self.var_list = var_list
+        self.weight_var_list = weight_var_list
+
+    def sample(self, *args, **kwargs):
+        return self.surrogate_distribution.sample(*args, **kwargs)
 
 
 class DenseHorseshoeAE(DenseHorseshoe):

@@ -39,7 +39,7 @@ tfb = tfp.bijectors
 
 
 def main():
-    data = get_data().iloc[range(1000), :]
+    data = get_data(reorient=True).iloc[range(1000), :]
     kf = KFold(n_splits=10)
     kf.get_n_splits(data)
     for train_index, test_index in kf.split(data):

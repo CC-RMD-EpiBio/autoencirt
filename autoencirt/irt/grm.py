@@ -57,8 +57,12 @@ class GRModel(IRTModel):
             kappa_scale=1e-2,
             weight_exponent=1.0,
             dim=2,
-            decay=.25):
-        super().__init__(dim, decay)
+            decay=.25,
+            positive_discriminations=True):
+        super().__init__(
+            dim=dim,
+            decay=decay,
+            positive_discriminations=positive_discriminations)
         self.auxiliary_parameterization = auxiliary_parameterization
         if auxiliary_parameterization:
             self.var_list = inspect.getfullargspec(
@@ -90,9 +94,9 @@ class GRModel(IRTModel):
         #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
         # \end{align}
         weights = (
-            discriminations**self.weight_exponent
+            tf.math.abs(discriminations)**self.weight_exponent
             / tf.reduce_sum(
-                discriminations**self.weight_exponent, axis=-3)[..., tf.newaxis, :, :])
+                tf.math.abs(discriminations)**self.weight_exponent, axis=-3)[..., tf.newaxis, :, :])
         probs = tf.reduce_sum(probs*weights, axis=-3)
         return probs
 
@@ -155,9 +159,16 @@ class GRModel(IRTModel):
                         ddifficulties, abilities, xi, eta, kappa,
                         mu):
         D = discriminations.shape[0]
-        rv_discriminations = tfd.Independent(
-            tfd.HalfNormal(scale=eta*xi*kappa),
-            reinterpreted_batch_ndims=4)
+        if self.positive_discriminations:
+            rv_discriminations = tfd.Independent(
+                tfd.HalfNormal(scale=eta*xi*kappa),
+                reinterpreted_batch_ndims=4)
+        else:
+            rv_discriminations = tfd.Independent(
+                tfd.Normal(
+                    loc=tf.zeros_like(discriminations),
+                    scale=eta*xi*kappa),
+                reinterpreted_batch_ndims=4)
         rv_difficulties0 = tfd.Independent(
             tfd.Normal(
                 loc=mu,
@@ -202,9 +213,16 @@ class GRModel(IRTModel):
     def joint_log_prior_auxiliary(self, discriminations, difficulties0,
                                   ddifficulties, abilities, xi, eta,
                                   kappa, xi_a, eta_a, kappa_a, mu):
-        rv_discriminations = tfd.Independent(
-            tfd.HalfNormal(scale=eta*xi*kappa),
-            reinterpreted_batch_ndims=4)
+        if self.positive_discriminations:
+            rv_discriminations = tfd.Independent(
+                tfd.HalfNormal(scale=eta*xi*kappa),
+                reinterpreted_batch_ndims=4)
+        else:
+            rv_discriminations = tfd.Independent(
+                tfd.Normal(
+                    loc=tf.zeros_like(discriminations),
+                    scale=eta*xi*kappa),
+                reinterpreted_batch_ndims=4)
         rv_difficulties0 = tfd.Independent(
             tfd.Normal(loc=mu, scale=1.),
             reinterpreted_batch_ndims=4)
@@ -312,10 +330,17 @@ class GRModel(IRTModel):
                     scale=tf.ones((1, self.dimensions, self.num_items, 1))),
                 reinterpreted_batch_ndims=4
             ),  # difficulties0
-            discriminations=lambda eta, xi, kappa: tfd.Independent(
-                tfd.HalfNormal(scale=eta*xi*kappa),
-                reinterpreted_batch_ndims=4
-            ),  # discrimination
+            discriminations=(
+                lambda eta, xi, kappa: tfd.Independent(
+                    tfd.HalfNormal(scale=eta*xi*kappa),
+                    reinterpreted_batch_ndims=4
+                )) if self.positive_discriminations else (
+                lambda eta, xi, kappa: tfd.Independent(
+                    tfd.Normal(
+                        loc=tf.zeros((1, self.dimensions, self.num_items, 1)),
+                        scale=eta*xi*kappa),
+                    reinterpreted_batch_ndims=4
+                )),  # discrimination
             ddifficulties=tfd.Independent(
                 tfd.HalfNormal(
                     scale=tf.ones(
@@ -367,9 +392,13 @@ class GRModel(IRTModel):
             ),
             'discriminations': self.bijectors['discriminations'](
                 build_trainable_normal_dist(
-                    tf.cast(
+                    (tf.cast(
                         (1.+np.abs(self.factor_loadings.T)),
-                        np.float32)[tf.newaxis, ..., tf.newaxis],
+                        np.float32)[tf.newaxis, ..., tf.newaxis]
+                     if self.positive_discriminations else
+                        tf.cast(self.factor_loadings.T, np.float32)[
+                        tf.newaxis, ..., tf.newaxis]
+                     ),
                     # tf.ones((1, self.dimensions, self.num_items, 1)),
                     1e-1*tf.ones((1, self.dimensions, self.num_items, 1)),
                     4
@@ -514,7 +543,7 @@ class GRModel(IRTModel):
         return (tfd.JointDistributionNamed(grm_joint_distribution_dict),
                 tfd.JointDistributionNamed(surrogate_distribution_dict))
 
-    def create_distributions(self):
+    def create_distributions(self, give_parts=False):
         """Create the relevant prior distributions
         and the surrogate distribution
         """
@@ -529,7 +558,10 @@ class GRModel(IRTModel):
         self.bijectors['eta'] = tfp.bijectors.Softplus()
         self.bijectors['xi'] = tfp.bijectors.Softplus()
         self.bijectors['kappa'] = tfp.bijectors.Softplus()
-        self.bijectors['discriminations'] = tfp.bijectors.Softplus()
+        if self.positive_discriminations:
+            self.bijectors['discriminations'] = tfp.bijectors.Softplus()
+        else:
+            self.bijectors['discriminations'] = tfp.bijectors.Identity()
         self.bijectors['ddifficulties'] = tfp.bijectors.Softplus()
         if self.auxiliary_parameterization:
             self.bijectors['eta_a'] = tfp.bijectors.Softplus()

@@ -41,19 +41,25 @@ class IRTModel(object):
     grid = None
     fa = None
     factor_loadings = None
-
+    xi_scale = None
+    kappa_scale = None
+    positive_discriminations = True
     scoring_network = None
 
-    def __init__(self, dim=1, decay=0.25):
+    def __init__(self,
+                 dim=1,
+                 decay=0.25,
+                 positive_discriminations=True):
         self.set_dimension(1)
         self.var_list = inspect.getfullargspec(
             self.joint_log_prob).args[2:]
         self.set_dimension(dim, decay)
+        self.positive_discriminations = positive_discriminations
 
     def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim
         self.dimensional_decay = decay
-        self.xi_scale *= (decay**tf.cast(
+        self.kappa_scale *= (decay**tf.cast(
             tf.range(dim), tf.float32)
         )[tf.newaxis, :, tf.newaxis, tf.newaxis]
         self.fa = FactorAnalyzer(n_factors=dim)

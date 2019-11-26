@@ -30,12 +30,17 @@ item_text = ["The established authorities generally turn out to be right about t
              "Homosexuals and feminists should be praised for being brave enough to defy \"traditional family values.\"",
              "This country would work a lot better if certain groups of troublemakers would just shut up and accept their group's traditional place in society."]
 
+reverse = [
+    3, 5, 7, 8, 10, 12, 14, 17, 19, 20
+]
 
-def get_data():
+def get_data(reorient=False):
     if not path.exists('RWAS/data.csv'):
         system("wget https://openpsychometrics.org/_rawdata/RWAS.zip")
         system("unzip RWAS.zip")
     data = pd.read_csv('RWAS/data.csv', low_memory=False)
     item_responses = data.loc[:, map(lambda x: 'Q'+str(x), list(range(1, 23)))]
+    if reorient:
+        item_responses.iloc[:, reverse] = 9 - item_responses.iloc[:, reverse]
     # system("rm -r RWAS")
     return item_responses
