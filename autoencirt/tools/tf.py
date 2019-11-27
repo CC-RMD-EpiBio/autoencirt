@@ -12,6 +12,12 @@ from tensorflow_probability.python.distributions.transformed_distribution import
     TransformedDistribution
 )
 
+from tensorflow.python.ops import control_flow_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import state_ops
+from tensorflow.python.framework import ops
+from tensorflow.python.training import optimizer
+
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
@@ -239,14 +245,14 @@ def build_trainable_concentration_scale_distribution(
     Args:
       initial_concentration: Float `Tensor` initial concentration.
       initial_scale: Float `Tensor` initial scale.
-      event_ndims: Integer `Tensor` number of event dimensions 
+      event_ndims: Integer `Tensor` number of event dimensions
         in `initial_concentration`.
       distribution_fn: Optional constructor for a `tfd.Distribution` instance
         in a location-scale family. This should have signature `dist =
         distribution_fn(loc, scale, validate_args)`.
         Default value: `tfd.Normal`.
-      validate_args: Python `bool`. Whether to validate input with asserts. 
-        This imposes a runtime cost. If `validate_args` is `False`, and the 
+      validate_args: Python `bool`. Whether to validate input with asserts.
+        This imposes a runtime cost. If `validate_args` is `False`, and the
         inputs are invalid, correct behavior is not guaranteed.
         Default value: `False`.
       name: Python `str` name prefixed to ops created by this function.
@@ -291,3 +297,5 @@ build_trainable_InverseGamma_dist = functools.partial(
 build_trainable_normal_dist = functools.partial(
     build_trainable_location_scale_distribution,
     distribution_fn=tfd.Normal)
+
+

@@ -12,6 +12,10 @@ from tensorflow_probability.python.mcmc.transformed_kernel import (
 
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
 
+from autoencirt.tools.tf import (
+    clip_gradients
+)
+
 tfd = tfp.distributions
 
 tfd = tfp.distributions
@@ -84,7 +88,8 @@ class AEGRModel(GRModel):
     def joint_log_prior(
             self, **x):
         weight_tensors = {v: x[v] for v in self.nn.weight_var_list}
-        abilities = self.nn.assemble_networks(weight_tensors)(self.calibration_data)
+        abilities = self.nn.assemble_networks(
+            weight_tensors)(self.calibration_data)
         grm_vars = {k: x[k] for k in self.grm_vars}
         grm_vars["abilities"] = abilities[..., tf.newaxis, tf.newaxis]
         grm_vars["responses"] = self.calibration_data
@@ -108,9 +113,9 @@ class AEGRModel(GRModel):
     def create_distributions(self, *args, **kwargs):
         super(
             AEGRModel, self
-            ).create_distributions(
-                *args, **kwargs
-            )
+        ).create_distributions(
+            *args, **kwargs
+        )
         self.surrogate_distribution_hybrid = (
             tfd.JointDistributionNamed({
                 **self.surrogate_distribution_dict,
@@ -137,7 +142,8 @@ class AEGRModel(GRModel):
             losses = tfp.vi.fit_surrogate_posterior(
                 target_log_prob_fn=(
                     self.joint_log_prob if clip is None
-                    else clip_gradients(self.unormalized_log_prob, clip)),
+                    else clip_gradients(
+                        self.joint_log_prob, clip)),
                 surrogate_posterior=self.surrogate_distribution_hybrid,
                 optimizer=opt,
                 num_steps=num_steps,
@@ -146,9 +152,11 @@ class AEGRModel(GRModel):
             return(losses)
 
         losses = run_approximation(num_steps)
+        print(losses)
         if (not np.isnan(losses[-1])) and (not np.isinf(losses[-1])):
             self.set_calibration_expectations()
         return(losses)
+
 
 def main():
     from autoencirt.data.rwa import get_data
@@ -158,7 +166,7 @@ def main():
     sample = aegrm.sample([2, 3])
     prob = aegrm.joint_log_prob(**sample)
     print(prob)
-    aegrm.calibrate_advi(10)
+    aegrm.calibrate_advi(10, clip=1.)
     return
 
 
