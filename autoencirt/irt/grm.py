@@ -584,6 +584,7 @@ class GRModel(IRTModel):
             constraining_bijectors=self.bijectors
         )
         """
+        self.surrogate_sample = self.surrogate_posterior.sample(1000)
         self.set_calibration_expectations()
 
     def score(self, responses, samples=400):
@@ -655,11 +656,17 @@ class GRModel(IRTModel):
         pass
 
     def waic(self, two=True, debug=False):
+        d0 = tf.concat(
+            [
+                self.surrogate_sample['difficulties0'],
+                self.surrogate_sample['ddifficulties']
+            ], axis=-1)
+        difficulties = tf.cumsum(d0, axis=-1)
         log_likelihoods = tf.reduce_sum(
             self.log_likelihood(
-                self.calibration_responses,
+                self.calibration_data,
                 self.surrogate_sample['discriminations'],
-                self.surrogate_sample['difficulties'],
+                difficulties,
                 self.surrogate_sample['abilities']
             ), axis=-1
         )

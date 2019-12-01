@@ -200,11 +200,12 @@ class IRTModel(object):
 
         losses = run_approximation(num_steps)
         if (not np.isnan(losses[-1])) and (not np.isinf(losses[-1])):
+            self.surrogate_sample = self.surrogate_posterior.sample(1000)
             self.set_calibration_expectations()
         return(losses)
 
     def set_calibration_expectations(self):
-        self.surrogate_sample = self.surrogate_posterior.sample(1000)
+        #  self.surrogate_sample = self.surrogate_posterior.sample(1000)
 
         self.calibrated_expectations = {
             k: tf.reduce_mean(v, axis=0)
@@ -264,3 +265,6 @@ class IRTModel(object):
     def in_numpy(self, dict_of_numpy):
         for k, v in dict_of_numpy.items():
             self.surrogate_sample[k] = tf.cast(v, tf.float32)
+            self.calibrated_expectations[k] = tf.reduce_mean(
+                self.surrogate_sample[k], axis=0
+            )
