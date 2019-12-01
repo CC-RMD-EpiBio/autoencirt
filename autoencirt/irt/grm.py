@@ -654,6 +654,41 @@ class GRModel(IRTModel):
     def loss(self, responses, scores):
         pass
 
+    def waic(self, two=True, debug=False):
+        log_likelihoods = tf.reduce_sum(
+            self.log_likelihood(
+                self.calibration_responses,
+                self.surrogate_sample['discriminations'],
+                self.surrogate_sample['difficulties'],
+                self.surrogate_sample['abilities']
+            ), axis=-1
+        )
+        likelihoods = tf.math.exp(
+            log_likelihoods
+        )   # Result is S x N
+        lppd = tf.reduce_sum(
+            tf.math.log(
+                tf.reduce_mean(
+                    likelihoods, axis=0
+                )
+            )
+        )
+
+        pwaic = tf.reduce_sum(
+            tf.math.reduce_variance(
+                log_likelihoods,
+                axis=0
+            )
+        )
+
+        if not two:
+            pass
+
+        if debug:
+            return {'lppd': lppd, 'paic': paic}
+
+        return lppd - paic
+
 
 def main():
     pass
