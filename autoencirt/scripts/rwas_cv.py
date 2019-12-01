@@ -40,7 +40,7 @@ tfb = tfp.bijectors
 
 def main():
     data = get_data(reorient=True).iloc[range(1000), :]
-    kf = KFold(n_splits=10)
+    kf = KFold(n_splits=2)
     kf.get_n_splits(data)
     for train_index, test_index in kf.split(data):
         grm = GRModel(
@@ -57,22 +57,15 @@ def main():
         discriminations = []
         losses = []
         # Use ADVI to get us close
-        for _ in range(50):
-            losses += [grm.calibrate_advi(30,
+        for _ in range(2):
+            losses += [grm.calibrate_advi(300,
                                           initial_learning_rate=5e-3).numpy()]
             print(losses[-1])
             discriminations += [grm.calibrated_expectations['discriminations']
                                 [0, ..., 0].numpy()]
             print(discriminations[-1])
 
-        for _ in range(50):
-            losses += [grm.calibrate_advi(25,
-                                          initial_learning_rate=1e-3).numpy()]
-            print(losses[-1])
-            discriminations += [grm.calibrated_expectations['discriminations']
-                                [0, ..., 0].numpy()]
-            print(discriminations[-1])
-        grm.score(data.iloc[test_index, :].to_numpy())
+        grm.waic()
 
         # MCMC sample from here
         traces, stats = grm.calibrate_mcmc(

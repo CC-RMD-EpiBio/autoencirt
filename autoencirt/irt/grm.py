@@ -655,29 +655,39 @@ class GRModel(IRTModel):
     def loss(self, responses, scores):
         pass
 
-    def waic(self, two=True, debug=False):
+    def waic(self, two=True, debug=False, splits=100):
         d0 = tf.concat(
             [
                 self.surrogate_sample['difficulties0'],
                 self.surrogate_sample['ddifficulties']
             ], axis=-1)
         difficulties = tf.cumsum(d0, axis=-1)
-        log_likelihoods = tf.reduce_sum(
-            self.log_likelihood(
-                self.calibration_data,
-                self.surrogate_sample['discriminations'],
-                difficulties,
-                self.surrogate_sample['abilities']
-            ), axis=-1
-        )
-        likelihoods = tf.math.exp(
-            log_likelihoods
-        )   # Result is S x N
+
+        split_difficulties = tf.split(difficulties, splits)
+        split_discriminations = tf.split(
+            self.surrogate_sample['discriminations'], splits)
+        split_abilities = tf.split(self.surrogate_sample['abilities'], splits)
+
+        log_likelihoods = tf.concat(
+            [
+                tf.reduce_sum(
+                    self.log_likelihood(
+                        self.calibration_data,
+                        dis,
+                        diff,
+                        ab
+                    ), axis=-1
+                )
+                for dis, diff, ab in zip(
+                    split_discriminations,
+                    split_difficulties,
+                    split_abilities)
+            ], axis=0)
+        likelihoods = tf.math.exp(log_likelihoods)   # Result is S x N
+
         lppd = tf.reduce_sum(
             tf.math.log(
-                tf.reduce_mean(
-                    likelihoods, axis=0
-                )
+                tf.reduce_mean(likelihoods, axis=0)
             )
         )
 
@@ -688,13 +698,20 @@ class GRModel(IRTModel):
             )
         )
 
+        elpdi = (
+            tf.math.log(tf.reduce_mean(likelihoods, axis=0))
+            - tf.math.reduce_variance(log_likelihoods, axis=0)
+        )
+
+        se = 2*tf.math.sqrt(self.num_people*tf.math.reduce_variance(elpdi))
+
         if not two:
             pass
 
         if debug:
-            return {'lppd': lppd, 'paic': paic}
+            return {'lppd': lppd, 'pwaic': pwaic}
 
-        return lppd - paic
+        return {'waic': 2*(-lppd + pwaic), 'se': se}
 
 
 def main():
