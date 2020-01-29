@@ -16,7 +16,8 @@ from tensorflow_probability.python.bijectors import softplus as softplus_lib
 from autoencirt.tools.tf import (
     clip_gradients, run_chain, LossLearningRateScheduler,
     build_trainable_InverseGamma_dist,
-    build_trainable_normal_dist
+    build_trainable_normal_dist,
+    fit_surrogate_posterior
 )
 
 tfd = tfp.distributions
@@ -172,35 +173,27 @@ class IRTModel(object):
         return self.weighted_likelihood.log_prob(x)
 
     def calibrate_advi(
-            self, num_steps=10, initial_learning_rate=5e-3,
-            decay_rate=0.99, learning_rate=None,
-            opt=None, clip=None):
-        if learning_rate is None:
-            learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate=initial_learning_rate,
-                decay_steps=num_steps,
-                decay_rate=decay_rate,
-                staircase=True)
-        if opt is None:
-            opt = tf.optimizers.Adam(
-                learning_rate=learning_rate)
+            self, num_steps=100, learning_rate=1.,
+            opt=None, clip=None, abs_tol=1e-5, rel_tol=0.001):
 
-        @tf.function
+        # @tf.function
         def run_approximation(num_steps):
-            losses = tfp.vi.fit_surrogate_posterior(
+            losses = fit_surrogate_posterior(
                 target_log_prob_fn=(
                     self.unormalized_log_prob if clip is None
                     else clip_gradients(self.unormalized_log_prob, clip)),
-                surrogate_posterior=self.surrogate_posterior,
-                optimizer=opt,
+                surrogate_posterior=self.surrogate_distribution,
                 num_steps=num_steps,
-                sample_size=25
+                sample_size=25,
+                learning_rate=learning_rate,
+                abs_tol=abs_tol,
+                rel_tol=rel_tol
             )
             return(losses)
 
         losses = run_approximation(num_steps)
         if (not np.isnan(losses[-1])) and (not np.isinf(losses[-1])):
-            self.surrogate_sample = self.surrogate_posterior.sample(1000)
+            self.surrogate_sample = self.surrogate_distribution.sample(1000)
             self.set_calibration_expectations()
         return(losses)
 

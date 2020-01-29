@@ -1,3 +1,7 @@
+from tensorflow_probability.python.vi import csiszar_divergence
+from tensorflow_probability.python import math as tfp_math
+import numpy as np
+
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.internal import prefer_static
 from tensorflow_probability.python.internal import dtype_util
@@ -46,7 +50,8 @@ class SqrtCauchy(TransformedDistribution):
 
     @property
     def scale(self):
-        """Distribution parameter for the pre-transformed standard deviation."""
+        """Distribution parameter for the
+           pre-transformed standard deviation."""
         return self.distribution.scale
 
 
@@ -74,7 +79,8 @@ class SqrtInverseGamma(TransformedDistribution):
 
     @property
     def scale(self):
-        """Distribution parameter for the pre-transformed standard deviation."""
+        """Distribution parameter for the
+           pre-transformed standard deviation."""
         return self.distribution.scale
 
 
@@ -220,7 +226,8 @@ class LossLearningRateScheduler(tf.keras.callbacks.History):
             else:
                 print(' '.join(('Learning rate:', str(current_lr))))
 
-            if self.spike_epochs is not None and len(self.epoch) in self.spike_epochs:
+            if self.spike_epochs is not None and len(
+                    self.epoch) in self.spike_epochs:
                 print(' '.join(('Spiking learning rate from', str(
                     current_lr), 'to', str(current_lr * self.spike_multiple))))
                 tf.keras.backend.set_value(self.model.optimizer.lr,
@@ -299,3 +306,224 @@ build_trainable_normal_dist = functools.partial(
     distribution_fn=tfd.Normal)
 
 
+def _trace_loss(loss, grads, variables): return loss
+
+
+def _trace_variables(loss, grads, variables): return loss, variables
+
+
+def auto_minimize(loss_fn,
+                  num_steps=1000,
+                  max_plateaus=10,
+                  abs_tol=1e-4,
+                  rel_tol=1e-4,
+                  trainable_variables=None,
+                  trace_fn=_trace_loss,
+                  learning_rate=1.,
+                  check_every=25,
+                  decay_rate=0.95,
+                  name='minimize'):
+
+    def learning_rate_schedule_fn(step):
+        return decay_rate**step
+
+    decay_step = 0
+
+    optimizer = tf.optimizers.Adam(
+        learning_rate=lambda: learning_rate_schedule_fn(decay_step)
+    )
+    opt = tfa.optimizers.Lookahead(optimizer)
+
+    learning_rate = 1.0 if learning_rate is None else learning_rate
+
+    abs_tol = 1e-8 if abs_tol is None else abs_tol
+    rel_tol = 1e-8 if rel_tol is None else rel_tol
+
+    @tf.function(autograph=False)
+    def train_loop_body(old_result, step):  # pylint: disable=unused-argument
+        """Run a single optimization step."""
+        with tf.GradientTape(
+                watch_accessed_variables=trainable_variables is None) as tape:
+            for v in trainable_variables or []:
+                tape.watch(v)
+            loss = loss_fn()
+        watched_variables = tape.watched_variables()
+        grads = tape.gradient(loss, watched_variables)
+        train_op = opt.apply_gradients(zip(grads, watched_variables))
+        with tf.control_dependencies([train_op]):
+            state = trace_fn(tf.identity(loss),
+                             [tf.identity(g) for g in grads],
+                             [tf.identity(v) for v in watched_variables])
+        return state
+
+    with tf.name_scope(name) as name:
+        # Compute the shape of the trace without executing
+        # the graph, if possible.
+        concrete_loop_body = train_loop_body.get_concrete_function(
+            tf.TensorSpec([]), tf.TensorSpec([]))  # Inputs ignored.
+        if all([tensorshape_util.is_fully_defined(shape)
+                for shape in tf.nest.flatten(concrete_loop_body.output_shapes)]):
+            state_initializer = tf.nest.map_structure(
+                lambda shape, dtype: tf.zeros(shape, dtype=dtype),
+                concrete_loop_body.output_shapes,
+                concrete_loop_body.output_dtypes)
+            initial_trace_step = None
+        else:
+            state_initializer = concrete_loop_body(
+                tf.convert_to_tensor(0.), tf.convert_to_tensor(0.))  # Inputs ignored.
+            max_steps = max_steps - 1
+            initial_trace_step = state_initializer
+
+        converged = False
+        results = []
+        losses = []
+        avg_losses = [1e10]*3
+        deviations = [1e10]*3
+        min_loss = 1e10
+        min_state = None
+        # Test the first step, and make sure we can initialize safely
+
+        losses += [
+            train_loop_body(state_initializer, 0)
+        ]
+
+        step = tf.cast(1, tf.int32)
+        while (step < num_steps) and not converged:
+            losses += [
+                train_loop_body(state_initializer, step)
+            ]
+            if step % check_every == 0:
+
+                if losses[-1] < min_loss:
+                    min_loss = losses[-1]
+
+                """Check for convergence
+                """
+                recent_losses = tf.convert_to_tensor(losses[-check_every:])
+                avg_loss = tf.reduce_mean(recent_losses).numpy()
+
+                if not np.isfinite(avg_loss):
+                    print("Backtracking due to inf or nan")
+
+                avg_losses += [avg_loss]
+                deviation = tf.math.reduce_std(recent_losses).numpy()
+                deviations += [deviation]
+                rel = deviation/avg_loss
+                status = f"Iteration {step} -- loss: {losses[-1].numpy()}, "
+                status += f"abs_err: {deviation}, rel_err: {rel}"
+
+                #
+                print(status)
+
+                """Check for plateau
+                """
+                if (
+                        avg_losses[-1] > avg_losses[-3]
+                ) and (
+                        avg_losses[-1] > avg_losses[-2]
+                ):
+                    decay_step += 1
+                    if decay_step >= max_plateaus:
+                        converged = True
+                        print(
+                            f"We have plateaued {decay_step} times so quitting"
+                        )
+                    else:
+                        status = "We are in a loss plateau"
+                        status += f" learning rate: {optimizer.lr}"
+                        print(status)
+
+                    # converged = True
+
+                if deviation < abs_tol:
+                    print(
+                        f"Converged in {step} iterations with acceptable absolute tolerance")
+                    converged = True
+                elif rel < rel_tol:
+                    print(
+                        f"Converged in {step} iterations with acceptable relative tolerance")
+                    converged = True
+            step += 1
+            if step >= num_steps:
+                print("Terminating because we are out of iterations")
+
+        trace = tf.stack(losses)
+        if initial_trace_step is not None:
+            trace = tf.nest.map_structure(
+                lambda a, b: tf.concat([a[tf.newaxis, ...], b], axis=0),
+                initial_trace_step, trace)
+        return trace
+
+
+# Silent fallback to score-function gradients leads to difficult-to-debug
+# failures, so we force reparameterization gradients by default.
+_reparameterized_elbo = functools.partial(
+    csiszar_divergence.monte_carlo_variational_loss,
+    discrepancy_fn=csiszar_divergence.kl_reverse,
+    use_reparameterization=True)
+
+
+def fit_surrogate_posterior(target_log_prob_fn,
+                            surrogate_posterior,
+                            num_steps,
+                            trace_fn=_trace_loss,
+                            variational_loss_fn=_reparameterized_elbo,
+                            sample_size=25,
+                            learning_rate=1.0,
+                            trainable_variables=None,
+                            seed=None,
+                            abs_tol=None,
+                            rel_tol=None):
+
+    def complete_variational_loss_fn():
+        return variational_loss_fn(
+            target_log_prob_fn,
+            surrogate_posterior,
+            sample_size=sample_size,
+            seed=seed)
+
+    return auto_minimize(complete_variational_loss_fn,
+                         num_steps=num_steps,
+                         trace_fn=trace_fn,
+                         learning_rate=learning_rate,
+                         trainable_variables=trainable_variables,
+                         abs_tol=abs_tol,
+                         rel_tol=rel_tol)
+
+
+def build_surrogate_posterior(joint_distribution_named,
+                              bijectors=None,
+                              exclude=[],
+                              num_samples=1000):
+    prior_sample = joint_distribution_named.sample(int(num_samples))
+    surrogate_dict = {}
+    means = {k: tf.reduce_mean(v, axis=0) for k, v in prior_sample.items()}
+    prior_sample = joint_distribution_named.sample()
+    for k, v in joint_distribution_named.model.items():
+        if k in exclude:
+            continue
+        if callable(v):
+            test_input = {
+                a: prior_sample[a] for a in inspect.getfullargspec(v).args}
+            test_distribution = v(**test_input)
+        else:
+            test_distribution = v
+        if isinstance(
+            test_distribution.distribution, tfd.InverseGamma
+        ) or isinstance(test_distribution.distribution, SqrtInverseGamma):
+            surrogate_dict[k] = bijectors[k](
+                build_trainable_InverseGamma_dist(
+                    2.*tf.ones(test_distribution.event_shape),
+                    tf.ones(test_distribution.event_shape),
+                    len(test_distribution.event_shape)
+                )
+            )
+        else:
+            surrogate_dict[k] = bijectors[k](
+                build_trainable_normal_dist(
+                    tfb.invert(bijectors[k])(means[k]),
+                    1e-2*tf.ones(test_distribution.event_shape),
+                    len(test_distribution.event_shape)
+                )
+            )
+    return tfd.JointDistributionNamed(surrogate_dict)
