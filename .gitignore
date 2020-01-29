@@ -109,3 +109,5 @@ RWAS.zip
 #
 
 sandbox/
+
+.DS_Store
