@@ -22,6 +22,8 @@ from tensorflow.python.ops import state_ops
 from tensorflow.python.framework import ops
 from tensorflow.python.training import optimizer
 
+import tensorflow_addons as tfa
+
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
@@ -322,10 +324,13 @@ def auto_minimize(loss_fn,
                   learning_rate=1.,
                   check_every=25,
                   decay_rate=0.95,
+                  checkpoint_name='chkpt',
                   name='minimize'):
 
+    learning_rate = 1.0 if learning_rate is None else learning_rate
+
     def learning_rate_schedule_fn(step):
-        return decay_rate**step
+        return learning_rate*decay_rate**step
 
     decay_step = 0
 
@@ -334,7 +339,10 @@ def auto_minimize(loss_fn,
     )
     opt = tfa.optimizers.Lookahead(optimizer)
 
-    learning_rate = 1.0 if learning_rate is None else learning_rate
+    checkpoint = tf.train.Checkpoint(optimizer=opt)
+    manager = tf.train.CheckpointManager(
+        checkpoint, './.tf_ckpts',
+        checkpoint_name=checkpoint_name, max_to_keep=3)
 
     abs_tol = 1e-8 if abs_tol is None else abs_tol
     rel_tol = 1e-8 if rel_tol is None else rel_tol
@@ -357,8 +365,7 @@ def auto_minimize(loss_fn,
         return state
 
     with tf.name_scope(name) as name:
-        # Compute the shape of the trace without executing
-        # the graph, if possible.
+        # Compute the shape of the trace without executing the graph, if possible.
         concrete_loop_body = train_loop_body.get_concrete_function(
             tf.TensorSpec([]), tf.TensorSpec([]))  # Inputs ignored.
         if all([tensorshape_util.is_fully_defined(shape)
@@ -387,6 +394,13 @@ def auto_minimize(loss_fn,
             train_loop_body(state_initializer, 0)
         ]
 
+        if not np.isfinite(losses[-1].numpy()):
+            print("Failed to initialize")
+            return None
+
+        save_path = manager.save()
+        print(f"Saved initial checkpoint: {save_path}")
+
         step = tf.cast(1, tf.int32)
         while (step < num_steps) and not converged:
             losses += [
@@ -394,16 +408,18 @@ def auto_minimize(loss_fn,
             ]
             if step % check_every == 0:
 
-                if losses[-1] < min_loss:
-                    min_loss = losses[-1]
-
                 """Check for convergence
                 """
                 recent_losses = tf.convert_to_tensor(losses[-check_every:])
                 avg_loss = tf.reduce_mean(recent_losses).numpy()
 
                 if not np.isfinite(avg_loss):
-                    print("Backtracking due to inf or nan")
+                    print("Backtracking and reducing learning rate due to inf or nan")
+                    checkpoint.restore(manager.latest_checkpoint)
+                    decay_step += 1
+                    step += 1
+                    print(f" learning rate: {optimizer.lr}")
+                    continue
 
                 avg_losses += [avg_loss]
                 deviation = tf.math.reduce_std(recent_losses).numpy()
@@ -411,8 +427,6 @@ def auto_minimize(loss_fn,
                 rel = deviation/avg_loss
                 status = f"Iteration {step} -- loss: {losses[-1].numpy()}, "
                 status += f"abs_err: {deviation}, rel_err: {rel}"
-
-                #
                 print(status)
 
                 """Check for plateau
@@ -426,14 +440,21 @@ def auto_minimize(loss_fn,
                     if decay_step >= max_plateaus:
                         converged = True
                         print(
-                            f"We have plateaued {decay_step} times so quitting"
-                        )
+                            f"We have plateaued {decay_step} times so quitting")
                     else:
                         status = "We are in a loss plateau"
                         status += f" learning rate: {optimizer.lr}"
                         print(status)
 
                     # converged = True
+
+                if losses[-1] < min_loss:
+                    """
+                    Save a checkpoint
+                    """
+                    min_loss = losses[-1]
+                    save_path = manager.save()
+                    print(f"Saved a checkpoint: {save_path}")
 
                 if deviation < abs_tol:
                     print(
@@ -452,6 +473,8 @@ def auto_minimize(loss_fn,
             trace = tf.nest.map_structure(
                 lambda a, b: tf.concat([a[tf.newaxis, ...], b], axis=0),
                 initial_trace_step, trace)
+
+        checkpoint.restore(manager.latest_checkpoint)
         return trace
 
 

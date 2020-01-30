@@ -182,7 +182,7 @@ class IRTModel(object):
                 target_log_prob_fn=(
                     self.unormalized_log_prob if clip is None
                     else clip_gradients(self.unormalized_log_prob, clip)),
-                surrogate_posterior=self.surrogate_distribution,
+                surrogate_posterior=self.surrogate_posterior,
                 num_steps=num_steps,
                 sample_size=25,
                 learning_rate=learning_rate,
@@ -193,7 +193,7 @@ class IRTModel(object):
 
         losses = run_approximation(num_steps)
         if (not np.isnan(losses[-1])) and (not np.isinf(losses[-1])):
-            self.surrogate_sample = self.surrogate_distribution.sample(1000)
+            self.surrogate_sample = self.surrogate_posterior.sample(1000)
             self.set_calibration_expectations()
         return(losses)
 
