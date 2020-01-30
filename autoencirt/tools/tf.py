@@ -16,6 +16,8 @@ from tensorflow_probability.python.distributions.transformed_distribution import
     TransformedDistribution
 )
 
+from tensorflow_probability.python.internal import tensorshape_util
+
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import state_ops
@@ -316,7 +318,7 @@ def _trace_variables(loss, grads, variables): return loss, variables
 
 def auto_minimize(loss_fn,
                   num_steps=1000,
-                  max_plateaus=10,
+                  max_decay_steps=40,
                   abs_tol=1e-4,
                   rel_tol=1e-4,
                   trainable_variables=None,
@@ -419,6 +421,8 @@ def auto_minimize(loss_fn,
                     decay_step += 1
                     step += 1
                     print(f" learning rate: {optimizer.lr}")
+                    loss = loss_fn()
+                    print(f" last good loss: {loss}")
                     continue
 
                 avg_losses += [avg_loss]
@@ -437,7 +441,7 @@ def auto_minimize(loss_fn,
                         avg_losses[-1] > avg_losses[-2]
                 ):
                     decay_step += 1
-                    if decay_step >= max_plateaus:
+                    if decay_step >= max_decay_steps:
                         converged = True
                         print(
                             f"We have plateaued {decay_step} times so quitting")
@@ -496,7 +500,8 @@ def fit_surrogate_posterior(target_log_prob_fn,
                             trainable_variables=None,
                             seed=None,
                             abs_tol=None,
-                            rel_tol=None):
+                            rel_tol=None,
+                            decay_rate=0.95):
 
     def complete_variational_loss_fn():
         return variational_loss_fn(
@@ -511,7 +516,8 @@ def fit_surrogate_posterior(target_log_prob_fn,
                          learning_rate=learning_rate,
                          trainable_variables=trainable_variables,
                          abs_tol=abs_tol,
-                         rel_tol=rel_tol)
+                         rel_tol=rel_tol,
+                         decay_rate=decay_rate)
 
 
 def build_surrogate_posterior(joint_distribution_named,

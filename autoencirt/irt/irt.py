@@ -46,11 +46,14 @@ class IRTModel(object):
     kappa_scale = None
     positive_discriminations = True
     scoring_network = None
+    dtype = tf.float64
 
     def __init__(self,
                  dim=1,
                  decay=0.25,
-                 positive_discriminations=True):
+                 positive_discriminations=True,
+                 dtype=tf.float64):
+        self.dtype = dtype
         self.set_dimension(1)
         self.var_list = inspect.getfullargspec(
             self.joint_log_prob).args[2:]
@@ -61,7 +64,7 @@ class IRTModel(object):
         self.dimensions = dim
         self.dimensional_decay = decay
         self.kappa_scale *= (decay**tf.cast(
-            tf.range(dim), tf.float32)
+            tf.range(dim), self.dtype)
         )[tf.newaxis, :, tf.newaxis, tf.newaxis]
         self.fa = FactorAnalyzer(n_factors=dim)
 
@@ -173,8 +176,9 @@ class IRTModel(object):
         return self.weighted_likelihood.log_prob(x)
 
     def calibrate_advi(
-            self, num_steps=100, learning_rate=1.,
-            opt=None, clip=None, abs_tol=1e-5, rel_tol=0.001):
+            self, num_steps=100, learning_rate=0.1,
+            opt=None, clip=None, abs_tol=1e-5, rel_tol=0.001,
+            decay_rate=0.25):
 
         # @tf.function
         def run_approximation(num_steps):
@@ -187,7 +191,8 @@ class IRTModel(object):
                 sample_size=25,
                 learning_rate=learning_rate,
                 abs_tol=abs_tol,
-                rel_tol=rel_tol
+                rel_tol=rel_tol,
+                decay_rate=decay_rate
             )
             return(losses)
 
@@ -224,8 +229,9 @@ class IRTModel(object):
         )
         trait_samples = sampling_rv.sample(shape)
         discrimination = self.calibrated_expectations['discriminations']
-        rv = tfd.Bernoulli(tf.ones_like(discrimination)*(1.0-sparsity))
-        discrimination = discrimination*tf.cast(rv.sample(), tf.float32)
+        rv = tfd.Bernoulli(
+            tf.ones_like(discrimination, dtype=self.dtype)*(1.0-sparsity))
+        discrimination = discrimination*tf.cast(rv.sample(), dtype=self.dtype)
         probs = self.grm_model_prob_d(
             self.calibrated_expectations['abilities'],
             discrimination,
@@ -257,7 +263,7 @@ class IRTModel(object):
 
     def in_numpy(self, dict_of_numpy):
         for k, v in dict_of_numpy.items():
-            self.surrogate_sample[k] = tf.cast(v, tf.float32)
+            self.surrogate_sample[k] = tf.cast(v, self.dtype)
             self.calibrated_expectations[k] = tf.reduce_mean(
                 self.surrogate_sample[k], axis=0
             )
