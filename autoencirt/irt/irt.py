@@ -1,24 +1,18 @@
 import inspect
 from itertools import product
 
-from factor_analyzer import (
-    ConfirmatoryFactorAnalyzer,
-    FactorAnalyzer,
-    ModelSpecificationParser)
-
-import tensorflow as tf
 import numpy as np
-from autoencirt.nn import Dense, DenseHorseshoe
-
+import tensorflow as tf
 import tensorflow_probability as tfp
+from autoencirt.nn import Dense, DenseHorseshoe
+from autoencirt.tools.tf import (LossLearningRateScheduler,
+                                 build_trainable_InverseGamma_dist,
+                                 build_trainable_normal_dist, clip_gradients,
+                                 fit_surrogate_posterior, run_chain)
+from factor_analyzer import (ConfirmatoryFactorAnalyzer, FactorAnalyzer,
+                             ModelSpecificationParser)
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
-from autoencirt.tools.tf import (
-    clip_gradients, run_chain, LossLearningRateScheduler,
-    build_trainable_InverseGamma_dist,
-    build_trainable_normal_dist,
-    fit_surrogate_posterior
-)
 
 tfd = tfp.distributions
 

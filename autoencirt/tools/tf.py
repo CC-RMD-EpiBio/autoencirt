@@ -1,31 +1,22 @@
-from tensorflow_probability.python.vi import csiszar_divergence
-from tensorflow_probability.python import math as tfp_math
-import numpy as np
-
-from tensorflow_probability.python import util as tfp_util
-from tensorflow_probability.python.internal import prefer_static
-from tensorflow_probability.python.internal import dtype_util
-import tensorflow as tf
-import tensorflow_probability as tfp
 import functools
-from tensorflow_probability.python.experimental.vi.surrogate_posteriors import(
-    build_trainable_location_scale_distribution
-)
-from tensorflow_probability.python.bijectors import softplus as softplus_lib
-from tensorflow_probability.python.distributions.transformed_distribution import (
-    TransformedDistribution
-)
 
-from tensorflow_probability.python.internal import tensorshape_util
-
-from tensorflow.python.ops import control_flow_ops
-from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import state_ops
-from tensorflow.python.framework import ops
-from tensorflow.python.training import optimizer
-
+import numpy as np
+import tensorflow as tf
 import tensorflow_addons as tfa
-
+import tensorflow_probability as tfp
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import control_flow_ops, math_ops, state_ops
+from tensorflow.python.training import optimizer
+from tensorflow_probability.python import math as tfp_math
+from tensorflow_probability.python import util as tfp_util
+from tensorflow_probability.python.bijectors import softplus as softplus_lib
+from tensorflow_probability.python.distributions.transformed_distribution import \
+    TransformedDistribution
+from tensorflow_probability.python.experimental.vi.surrogate_posteriors import \
+    build_trainable_location_scale_distribution
+from tensorflow_probability.python.internal import (dtype_util, prefer_static,
+                                                    tensorshape_util)
+from tensorflow_probability.python.vi import csiszar_divergence
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
@@ -341,7 +332,16 @@ def auto_minimize(loss_fn,
     )
     opt = tfa.optimizers.Lookahead(optimizer)
 
-    checkpoint = tf.train.Checkpoint(optimizer=opt)
+    with tf.GradientTape(watch_accessed_variables=trainable_variables is None) as tape:
+        for v in trainable_variables or []:
+            tape.watch(v)
+        loss = loss_fn()
+    watched_variables = tape.watched_variables()
+
+    checkpoint = tf.train.Checkpoint(
+        optimizer=opt, **{
+            "var_" + str(j): v for j, v in enumerate(watched_variables)
+            })
     manager = tf.train.CheckpointManager(
         checkpoint, './.tf_ckpts',
         checkpoint_name=checkpoint_name, max_to_keep=3)

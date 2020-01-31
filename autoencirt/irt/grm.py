@@ -1,29 +1,22 @@
 #!/usr/bin/env python3
 import inspect
 import itertools
+
 import numpy as np
 import pandas as pd
-
-from autoencirt.irt import IRTModel
-from autoencirt.tools.tf import (
-    clip_gradients, run_chain, LossLearningRateScheduler,
-    build_trainable_InverseGamma_dist,
-    build_trainable_normal_dist
-)
-
-
-from factor_analyzer import (
-    ConfirmatoryFactorAnalyzer,
-    FactorAnalyzer,
-    ModelSpecificationParser)
-
 import tensorflow as tf
 import tensorflow_probability as tfp
+from autoencirt.irt import IRTModel
+from autoencirt.tools.tf import (LossLearningRateScheduler,
+                                 build_trainable_InverseGamma_dist,
+                                 build_trainable_normal_dist, clip_gradients,
+                                 run_chain)
+from factor_analyzer import (ConfirmatoryFactorAnalyzer, FactorAnalyzer,
+                             ModelSpecificationParser)
 from tensorflow_probability.python import util as tfp_util
-from tensorflow_probability.python.mcmc.transformed_kernel import (
-    make_transform_fn, make_transformed_log_prob, make_log_det_jacobian_fn)
-
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
+from tensorflow_probability.python.mcmc.transformed_kernel import (
+    make_log_det_jacobian_fn, make_transform_fn, make_transformed_log_prob)
 
 tfd = tfp.distributions
 
