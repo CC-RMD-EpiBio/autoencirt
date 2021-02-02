@@ -111,3 +111,5 @@ RWAS.zip
 sandbox/
 
 .DS_Store
+*.tf_ckpts*
+
