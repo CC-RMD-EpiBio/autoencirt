@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import inspect
 import itertools
 
 import numpy as np
@@ -570,7 +569,7 @@ class GRModel(IRTModel):
     def loss(self, responses, scores):
         pass
 
-    def unormalized_log_prob(self, data=None, **params):
+    def unormalized_log_prob(self, data, **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
         log_likelihood = self.log_likelihood(data, **params)
         return log_prior + log_likelihood

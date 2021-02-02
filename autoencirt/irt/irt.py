@@ -1,4 +1,3 @@
-import inspect
 from itertools import product
 
 import numpy as np
@@ -120,17 +119,6 @@ class IRTModel(BayesianModel):
         def loss():
             dnn_fun = dnn.build_network(dnn_params, tf.nn.relu)
             return -ability_distribution.log_prob(dnn_fun(self.response_data))
-
-    def unormalized_log_prob_list(self, *x):
-        return self.unormalized_log_prob(
-            **{
-                v: t for v, t in zip(self.var_list, x)
-            }
-        )
-
-    def unormalized_log_prob2(self, **x):
-        x['x'] = self.calibration_data
-        return self.weighted_likelihood.log_prob(x)
 
     def simulate_data(self, shape, sparsity=0.5):
         sampling_rv = tfd.Independent(
