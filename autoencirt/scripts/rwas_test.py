@@ -38,10 +38,25 @@ def main():
     grm.unormalized_log_prob(**p, data=ds)
     
     losses = grm.calibrate_advi(
-        num_epochs=100, rel_tol=1e-4, learning_rate=.1)
+        num_epochs=50, rel_tol=1e-4, learning_rate=.01)
     
+    print(
+        grm.calibrated_expectations['discriminations'][0, ..., 0]
+        )
     
-
+    losses = grm.calibrate_advi(
+        num_epochs=50, rel_tol=1e-4, learning_rate=.01)
+    
+    print(
+        grm.calibrated_expectations['discriminations'][0, ..., 0]
+        )
+    
+    losses = grm.calibrate_advi(
+        num_epochs=50, rel_tol=1e-4, learning_rate=.005)
+    
+    print(
+        grm.calibrated_expectations['discriminations'][0, ..., 0]
+        )
 
 
 if __name__ == "__main__":

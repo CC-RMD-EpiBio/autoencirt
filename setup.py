@@ -35,7 +35,7 @@ setuptools.setup(
     ],
     python_requires='>=3.6',
     scripts=[
-        'autoencirt/scripts/rwas_cv.py',
+        'autoencirt/scripts/rwas_test.py',
         'autoencirt/scripts/test_nn.py'
     ]
 )
