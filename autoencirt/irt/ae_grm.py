@@ -1,7 +1,7 @@
 import numpy as np
 
 from autoencirt.irt.grm import GRModel
-from autoencirt.nn import DenseHorseshoe
+from bayesianquilts.dense import DenseHorseshoe
 
 
 import tensorflow as tf
@@ -12,7 +12,7 @@ from tensorflow_probability.python.mcmc.transformed_kernel import (
 
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
 
-from autoencirt.tools.tf import (
+from bayesianquilts.util import (
     clip_gradients
 )
 
