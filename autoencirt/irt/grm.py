@@ -11,6 +11,8 @@ from bayesianquilts.util import (
     build_trainable_normal_dist, clip_gradients,
     run_chain)
 
+from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
+
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
 from tensorflow_probability.python.mcmc.transformed_kernel import (
@@ -168,8 +170,6 @@ class GRModel(IRTModel):
                       K-1)
             ),
             axis=-1)
-        abilities0 = np.random.normal(
-            size=(self.num_people, self.dimensions, 1, 1))
 
         grm_joint_distribution_dict = dict(
             mu=tfd.Independent(
@@ -183,33 +183,6 @@ class GRModel(IRTModel):
                 ),
                 reinterpreted_batch_ndims=4
             ),  # mu
-            eta=tfd.Independent(
-                tfd.HalfCauchy(
-                    loc=tf.zeros(
-                        (1, 1, self.num_items, 1),
-                        dtype=self.dtype),
-                    scale=self.eta_scale
-                ),
-                reinterpreted_batch_ndims=4
-            ),  # eta
-            xi=tfd.Independent(
-                tfd.HalfCauchy(
-                    loc=tf.zeros(
-                        (1, self.dimensions, self.num_items, 1),
-                        dtype=self.dtype),
-                    scale=self.xi_scale
-                ),
-                reinterpreted_batch_ndims=4
-            ),  # xi
-            kappa=tfd.Independent(
-                tfd.HalfCauchy(
-                    loc=tf.zeros(
-                        (1, self.dimensions, 1, 1),
-                        dtype=self.dtype),
-                    scale=self.kappa_scale
-                ),
-                reinterpreted_batch_ndims=4
-            ),  #
             difficulties0=lambda mu: tfd.Independent(
                 tfd.Normal(
                     loc=mu,
@@ -270,8 +243,10 @@ class GRModel(IRTModel):
 
         surrogate_distribution_dict = {
             'abilities': build_trainable_normal_dist(
-                tf.cast(abilities0, dtype=self.dtype),
-                1e-2*tf.ones(
+                tf.zeros(
+                    (self.num_people, self.dimensions, 1, 1),
+                    dtype=self.dtype),
+                1e-1*tf.ones(
                     (self.num_people, self.dimensions, 1, 1),
                     dtype=self.dtype),
                 4
@@ -299,10 +274,10 @@ class GRModel(IRTModel):
                     #    tf.cast(self.factor_loadings.T, dtype=self.dtype)[
                     #    tf.newaxis, ..., tf.newaxis]
                     # ),
-                    tf.ones(
+                    0.25*tf.ones(
                         (1, self.dimensions, self.num_items, 1),
                         dtype=self.dtype),
-                    1e-3*tf.ones(
+                    1e-1*tf.ones(
                         (1, self.dimensions, self.num_items, 1),
                         dtype=self.dtype),
                     4
@@ -312,7 +287,7 @@ class GRModel(IRTModel):
                 tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
-                1e-3*tf.ones(
+                1e-2*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
                 4
@@ -323,10 +298,11 @@ class GRModel(IRTModel):
             'eta': self.bijectors['eta'](
                 build_trainable_InverseGamma_dist(
                     0.5*tf.ones(
-                        (1, 1, self.num_items, 1), dtype=self.dtype),
+                        (1, 1, self.num_items, 1),
+                        dtype=self.dtype),
                     tf.ones(
                         (1, 1, self.num_items, 1),
-                        dtype=self.dtype)/self.eta_scale,
+                        dtype=self.dtype),
                     4
                 )
             ),
@@ -337,7 +313,7 @@ class GRModel(IRTModel):
                         dtype=self.dtype),
                     tf.ones(
                         (1, self.dimensions, self.num_items, 1),
-                        dtype=self.dtype)/self.xi_scale,
+                        dtype=self.dtype),
                     4
                 )
             ),
@@ -345,7 +321,9 @@ class GRModel(IRTModel):
                 build_trainable_InverseGamma_dist(
                     0.5*tf.ones(
                         (1, self.dimensions, 1, 1), dtype=self.dtype),
-                    1.0/tf.cast(self.kappa_scale, dtype=self.dtype),
+                    tf.ones(
+                        (1, self.dimensions, 1, 1),
+                        dtype=self.dtype),
                     4
                 )
             ),
@@ -365,24 +343,26 @@ class GRModel(IRTModel):
                 0.5*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
-                tf.cast(
-                    1.0/tf.math.square(self.xi_scale), dtype=self.dtype)
+                tf.ones(
+                    (1, self.dimensions, self.num_items, 1),
+                    dtype=self.dtype)/self.xi_scale**2
             ),
             reinterpreted_batch_ndims=4
         )
         surrogate_distribution_dict["xi_a"] = self.bijectors['xi_a'](
             build_trainable_InverseGamma_dist(
-                0.5*tf.ones(
+                2*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
-                tf.cast(
-                    1.0/tf.math.square(self.xi_scale), dtype=self.dtype),
+                tf.ones(
+                    (1, self.dimensions, self.num_items, 1),
+                    dtype=self.dtype),
                 4
             )
         )
 
         grm_joint_distribution_dict["xi"] = lambda xi_a: tfd.Independent(
-            tfd.InverseGamma(
+            SqrtInverseGamma(
                 0.5*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
@@ -393,7 +373,7 @@ class GRModel(IRTModel):
 
         surrogate_distribution_dict["xi"] = self.bijectors['xi'](
             build_trainable_InverseGamma_dist(
-                0.5*tf.ones(
+                tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
                 tf.ones(
@@ -408,25 +388,27 @@ class GRModel(IRTModel):
                 0.5*tf.ones(
                     (1, 1, self.num_items, 1),
                     dtype=self.dtype),
-                tf.cast(
-                    1.0/tf.math.square(self.eta_scale),
-                    dtype=self.dtype)
+                tf.ones(
+                    (1, 1, self.num_items, 1),
+                    dtype=self.dtype)/self.eta_scale**2
             ),
             reinterpreted_batch_ndims=4
         )
 
         surrogate_distribution_dict["eta_a"] = self.bijectors['eta_a'](
             build_trainable_InverseGamma_dist(
-                0.5*tf.ones(
-                    (1, 1, self.num_items, 1), dtype=self.dtype),
-                tf.cast(
-                    1.0/tf.math.square(self.eta_scale), dtype=self.dtype),
+                2.0*tf.ones(
+                    (1, 1, self.num_items, 1),
+                    dtype=self.dtype),
+                tf.ones(
+                    (1, 1, self.num_items, 1),
+                    dtype=self.dtype),
                 4
             )
         )
 
         grm_joint_distribution_dict["eta"] = lambda eta_a: tfd.Independent(
-            tfd.InverseGamma(
+            SqrtInverseGamma(
                 0.5*tf.ones(
                     (1, 1, self.num_items, 1), dtype=self.dtype),
                 1.0/eta_a
@@ -436,7 +418,7 @@ class GRModel(IRTModel):
 
         surrogate_distribution_dict["eta"] = self.bijectors['eta'](
             build_trainable_InverseGamma_dist(
-                0.5*tf.ones((1, 1, self.num_items, 1), dtype=self.dtype),
+                2.0*tf.ones((1, 1, self.num_items, 1), dtype=self.dtype),
                 tf.ones((1, 1, self.num_items, 1), dtype=self.dtype),
                 4
             )
@@ -445,27 +427,29 @@ class GRModel(IRTModel):
         grm_joint_distribution_dict["kappa_a"] = tfd.Independent(
             tfd.InverseGamma(
                 0.5*tf.ones((1, self.dimensions, 1, 1), dtype=self.dtype),
-                tf.cast(
-                    1.0/tf.math.square(self.kappa_scale), dtype=self.dtype)
+                tf.ones(
+                    (1, self.dimensions, 1, 1),
+                    dtype=self.dtype)/self.kappa_scale**2
             ),
             reinterpreted_batch_ndims=4
         )
 
         surrogate_distribution_dict["kappa_a"] = self.bijectors['kappa_a'](
             build_trainable_InverseGamma_dist(
-                0.5*tf.ones(
+                2.0*tf.ones(
                     (1, self.dimensions, 1, 1),
                     dtype=self.dtype),
-                tf.cast(
-                    1.0/tf.math.square(self.kappa_scale),
-                    dtype=self.dtype),
+                tf.ones(
+                    (1, self.dimensions, 1, 1),
+                    dtype=self.dtype
+                    ),
                 4
             )
         )
 
         grm_joint_distribution_dict["kappa"] = (
             lambda kappa_a: tfd.Independent(
-                tfd.InverseGamma(
+                SqrtInverseGamma(
                     0.5*tf.ones(
                         (1, self.dimensions, 1, 1),
                         dtype=self.dtype),
@@ -477,10 +461,11 @@ class GRModel(IRTModel):
 
         surrogate_distribution_dict["kappa"] = self.bijectors['kappa'](
             build_trainable_InverseGamma_dist(
-                0.5*tf.ones(
+                2.0*tf.ones(
                     (1, self.dimensions, 1, 1), dtype=self.dtype),
-                tf.cast(
-                    1.0/self.kappa_scale, dtype=self.dtype),
+                tf.ones(
+                    (1, self.dimensions, 1, 1),
+                    dtype=self.dtype),
                 4
             )
         )

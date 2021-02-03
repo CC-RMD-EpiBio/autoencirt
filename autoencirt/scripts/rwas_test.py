@@ -10,6 +10,7 @@ import pandas as pd
 from autoencirt.irt import GRModel
 from autoencirt.data.rwa import item_text, get_data
 
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -25,36 +26,37 @@ def main():
         data=data,
         item_keys=item_names,
         num_people=num_people,
-        dim=3,
-        xi_scale=1e-2,
+        dim=2,
+        xi_scale=1e-1,
         eta_scale=1e-1,
         kappa_scale=1e-1,
-        weight_exponent=1,
+        weight_exponent=0.5,
         response_cardinality=10
     )
-    ds = next(iter(data.batch(121)))
-    p = grm.surrogate_distribution.sample(13)
-    grm.log_likelihood(**p, responses=ds)
-    grm.unormalized_log_prob(**p, data=ds)
+    # ds = next(iter(data.batch(121)))
+    # p = grm.surrogate_distribution.sample(13)
+    # grm.log_likelihood(**p, responses=ds)
+    # grm.unormalized_log_prob(**p, data=ds)
     
     losses = grm.calibrate_advi(
-        num_epochs=5, rel_tol=1e-4, learning_rate=.1)
+        num_epochs=100, rel_tol=1e-4,
+        learning_rate=.025, clip_value=4.)
+    
+    print(
+        grm.calibrated_expectations['discriminations'][0, ..., 0]
+        )
+        
+    losses = grm.calibrate_advi(
+        num_epochs=100, rel_tol=1e-4,
+        learning_rate=.01, clip_value=4.)
     
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
         )
     
-    grm.calibrate_mcmc()
-    
     losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4, learning_rate=.01)
-    
-    print(
-        grm.calibrated_expectations['discriminations'][0, ..., 0]
-        )
-    
-    losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4, learning_rate=.005)
+        num_epochs=100, rel_tol=1e-4,
+        learning_rate=.001, clip_value=4.)
     
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
