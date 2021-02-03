@@ -4,7 +4,8 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from bayesianquilts.nn.dense import Dense, DenseHorseshoe
-from bayesianquilts.model import BayesianModel
+# from bayesianquilts.model import BayesianModel
+from autoencirt.irt.model import BayesianModel
 from bayesianquilts.util import (clip_gradients,
                                  fit_surrogate_posterior, run_chain)
 from tensorflow_probability.python import util as tfp_util
@@ -72,7 +73,7 @@ class IRTModel(BayesianModel):
         self.weight_exponent = weight_exponent
         self.response_cardinality = response_cardinality
         self.num_people = num_people
-        self.create_distributions()
+        # self.create_distributions()
 
     def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim
