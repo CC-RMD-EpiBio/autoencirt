@@ -170,8 +170,6 @@ class GRModel(IRTModel):
                       K-1)
             ),
             axis=-1)
-        abilities0 = np.random.normal(
-            size=(self.num_people, self.dimensions, 1, 1))
 
         grm_joint_distribution_dict = dict(
             mu=tfd.Independent(
@@ -185,33 +183,6 @@ class GRModel(IRTModel):
                 ),
                 reinterpreted_batch_ndims=4
             ),  # mu
-            eta=tfd.Independent(
-                tfd.HalfCauchy(
-                    loc=tf.zeros(
-                        (1, 1, self.num_items, 1),
-                        dtype=self.dtype),
-                    scale=self.eta_scale
-                ),
-                reinterpreted_batch_ndims=4
-            ),  # eta
-            xi=tfd.Independent(
-                tfd.HalfCauchy(
-                    loc=tf.zeros(
-                        (1, self.dimensions, self.num_items, 1),
-                        dtype=self.dtype),
-                    scale=self.xi_scale
-                ),
-                reinterpreted_batch_ndims=4
-            ),  # xi
-            kappa=tfd.Independent(
-                tfd.HalfCauchy(
-                    loc=tf.zeros(
-                        (1, self.dimensions, 1, 1),
-                        dtype=self.dtype),
-                    scale=self.kappa_scale
-                ),
-                reinterpreted_batch_ndims=4
-            ),  #
             difficulties0=lambda mu: tfd.Independent(
                 tfd.Normal(
                     loc=mu,
@@ -272,8 +243,10 @@ class GRModel(IRTModel):
 
         surrogate_distribution_dict = {
             'abilities': build_trainable_normal_dist(
-                tf.cast(abilities0, dtype=self.dtype),
-                1e-2*tf.ones(
+                tf.zeros(
+                    (self.num_people, self.dimensions, 1, 1),
+                    dtype=self.dtype),
+                1e-1*tf.ones(
                     (self.num_people, self.dimensions, 1, 1),
                     dtype=self.dtype),
                 4
@@ -301,10 +274,10 @@ class GRModel(IRTModel):
                     #    tf.cast(self.factor_loadings.T, dtype=self.dtype)[
                     #    tf.newaxis, ..., tf.newaxis]
                     # ),
-                    tf.ones(
+                    0.25*tf.ones(
                         (1, self.dimensions, self.num_items, 1),
                         dtype=self.dtype),
-                    1e-3*tf.ones(
+                    1e-1*tf.ones(
                         (1, self.dimensions, self.num_items, 1),
                         dtype=self.dtype),
                     4
@@ -314,7 +287,7 @@ class GRModel(IRTModel):
                 tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
-                1e-3*tf.ones(
+                1e-2*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
                 4

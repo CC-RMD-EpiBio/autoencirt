@@ -26,12 +26,11 @@ def main():
         data=data,
         item_keys=item_names,
         num_people=num_people,
-        dim=3,
-        decay=0.1,
-        xi_scale=1e-3,
-        eta_scale=1e-3,
-        kappa_scale=1e-3,
-        weight_exponent=1,
+        dim=2,
+        xi_scale=1e-1,
+        eta_scale=1e-1,
+        kappa_scale=1e-1,
+        weight_exponent=0.5,
         response_cardinality=10
     )
     # ds = next(iter(data.batch(121)))
@@ -40,21 +39,24 @@ def main():
     # grm.unormalized_log_prob(**p, data=ds)
     
     losses = grm.calibrate_advi(
-        num_epochs=10, rel_tol=1e-4, learning_rate=.1)
+        num_epochs=100, rel_tol=1e-4,
+        learning_rate=.025, clip_value=4.)
     
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
         )
         
     losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4, learning_rate=.01)
+        num_epochs=100, rel_tol=1e-4,
+        learning_rate=.01, clip_value=4.)
     
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
         )
     
     losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4, learning_rate=.005)
+        num_epochs=100, rel_tol=1e-4,
+        learning_rate=.001, clip_value=4.)
     
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
