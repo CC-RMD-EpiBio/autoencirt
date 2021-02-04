@@ -57,6 +57,7 @@ class GRModel(IRTModel):
                 fa = FactorAnalyzer(n_factors=self.dimensions)
                 fa.fit(df)
                 self.factor_loadings = fa.loadings_
+                
             else:
                 print("Not doing a factor analysis because we have too much missingness")
         self.create_distributions()
