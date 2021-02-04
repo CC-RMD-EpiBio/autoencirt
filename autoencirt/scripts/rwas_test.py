@@ -27,8 +27,8 @@ def main():
         item_keys=item_names,
         num_people=num_people,
         dim=2,
-        xi_scale=1e-2,
-        eta_scale=1e-2,
+        xi_scale=1e-4,
+        eta_scale=1e-4,
         weight_exponent=1.,
         response_cardinality=10,
     )
@@ -40,7 +40,8 @@ def main():
     losses = grm.calibrate_advi(
         num_epochs=50, rel_tol=1e-4,
         learning_rate=.01, clip_value=4.,
-        data_batches=2)
+        data_batches=10
+    )
 
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
@@ -48,7 +49,7 @@ def main():
 
     losses = grm.calibrate_advi(
         num_epochs=50, rel_tol=1e-4,
-        learning_rate=.01, clip_value=4.)
+        learning_rate=.01, clip_value=4., data_batches=10)
 
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
@@ -56,7 +57,7 @@ def main():
 
     losses = grm.calibrate_advi(
         num_epochs=50, rel_tol=1e-4,
-        learning_rate=.01, clip_value=4.)
+        learning_rate=.005, clip_value=4., data_batches=10)
 
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
@@ -64,7 +65,7 @@ def main():
 
     losses = grm.calibrate_advi(
         num_epochs=50, rel_tol=1e-4,
-        learning_rate=.01, clip_value=4.)
+        learning_rate=.005, clip_value=4., data_batches=2)
 
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
@@ -72,7 +73,7 @@ def main():
 
     losses = grm.calibrate_advi(
         num_epochs=50, rel_tol=1e-4,
-        learning_rate=.01, clip_value=4.)
+        learning_rate=.001, clip_value=4., data_batches=2)
 
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
@@ -80,7 +81,7 @@ def main():
 
     losses = grm.calibrate_advi(
         num_epochs=50, rel_tol=1e-4,
-        learning_rate=.01, clip_value=4.)
+        learning_rate=.001, clip_value=4., data_batches=2)
 
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
