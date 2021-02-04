@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="autoencirt",  # Replace with your own username
-    version="0.0.2",
+    version="0.0.3",
     author="Josh Chang",
     author_email="josh@mederrata.com",
     description="",

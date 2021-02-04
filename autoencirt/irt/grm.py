@@ -53,9 +53,12 @@ class GRModel(IRTModel):
             df = pd.DataFrame(df)
             df[df < 0] = np.nan
             df = df.dropna()
-            fa = FactorAnalyzer(n_factors=self.dimensions)
-            fa.fit(df)
-            self.factor_loadings = fa.loadings_
+            if len(df) > 5:
+                fa = FactorAnalyzer(n_factors=self.dimensions)
+                fa.fit(df)
+                self.factor_loadings = fa.loadings_
+            else:
+                print("Not doing a factor analysis because we have too much missingness")
         self.create_distributions()
 
     def grm_model_prob(self, abilities, discriminations, difficulties):
