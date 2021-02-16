@@ -192,9 +192,15 @@ class BayesianModel(object):
         card = self.data_cardinality
         if card is None:
             card = tf_data_cardinality(data)
-        _data = data.batch(card)
+        _data = data.batch(int(card/10))
+        _data = _data.prefetch(2)
         
-        energy = partial(self.unormalized_log_prob_list, data=next(iter(_data)))
+        def energy(*x):
+            energy = 0
+            for batch in iter(_data):
+                energy += self.unormalized_log_prob_list(batch, x)
+            return energy
+        
 
         samples, sampler_stat = run_chain(
             init_state=initial_list,
