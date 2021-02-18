@@ -38,7 +38,7 @@ def main():
     # grm.unormalized_log_prob(**p, data=ds)
 
     losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4,
+        num_epochs=5, rel_tol=1e-4,
         learning_rate=.01, clip_value=4.,
         data_batches=10
     )
@@ -47,41 +47,8 @@ def main():
         grm.calibrated_expectations['discriminations'][0, ..., 0]
     )
 
-    losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4,
-        learning_rate=.01, clip_value=4., data_batches=10)
-
-    print(
-        grm.calibrated_expectations['discriminations'][0, ..., 0]
-    )
-
-    losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4,
-        learning_rate=.005, clip_value=4., data_batches=10)
-
-    print(
-        grm.calibrated_expectations['discriminations'][0, ..., 0]
-    )
-
-    losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4,
-        learning_rate=.005, clip_value=4., data_batches=2)
-
-    print(
-        grm.calibrated_expectations['discriminations'][0, ..., 0]
-    )
-
-    losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4,
-        learning_rate=.001, clip_value=4., data_batches=2)
-
-    print(
-        grm.calibrated_expectations['discriminations'][0, ..., 0]
-    )
-
-    losses = grm.calibrate_advi(
-        num_epochs=50, rel_tol=1e-4,
-        learning_rate=.001, clip_value=4., data_batches=2)
+    grm.calibrate_mcmc(
+        num_steps=1000, burnin=500)
 
     print(
         grm.calibrated_expectations['discriminations'][0, ..., 0]
