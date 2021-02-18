@@ -124,7 +124,7 @@ class BayesianModel(object):
             _data = data.batch(batch_size, drop_remainder=True)
             # data = data.batch
 
-        _data = _data.prefetch(2)
+        _data = _data.prefetch(tf.data.experimental.AUTOTUNE)
 
         def run_approximation(num_epochs):
             losses = fit_surrogate_posterior(
@@ -193,14 +193,14 @@ class BayesianModel(object):
         if card is None:
             card = tf_data_cardinality(data)
         _data = data.batch(int(card/10))
-        _data = _data.prefetch(2)
+        _data = _data.prefetch(tf.data.experimental.AUTOTUNE)
         
+        @tf.function
         def energy(*x):
             energy = 0
             for batch in iter(_data):
                 energy += self.unormalized_log_prob_list(batch, x)
             return energy
-        
 
         samples, sampler_stat = run_chain(
             init_state=initial_list,
