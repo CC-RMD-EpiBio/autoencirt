@@ -195,9 +195,8 @@ class BayesianModel(object):
         _data = data.batch(int(card/10))
         _data = _data.prefetch(tf.data.experimental.AUTOTUNE)
         
-        @tf.function
         def energy(*x):
-            energy = 0
+            energy = 0.
             for batch in iter(_data):
                 energy += self.unormalized_log_prob_list(batch, x)
             return energy
