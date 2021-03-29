@@ -196,10 +196,12 @@ class BayesianModel(object):
         _data = _data.prefetch(tf.data.experimental.AUTOTUNE)
         
         def energy(*x):
-            energy = 0.
-            for batch in iter(_data):
-                energy += self.unormalized_log_prob_list(batch, x)
-            return energy
+            energies = [
+                tf.reduce_sum(
+                    self.unormalized_log_prob_list(batch, x)) for batch in iter(_data)
+            ]
+
+            return tf.add_n(energies)
 
         samples, sampler_stat = run_chain(
             init_state=initial_list,
