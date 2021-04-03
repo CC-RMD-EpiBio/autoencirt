@@ -5,7 +5,6 @@ from copy import copy, deepcopy
 
 import numpy as np
 import pandas as pd
-import pandas as pd
 
 from autoencirt.irt import GRModel
 from autoencirt.data.rwa import item_text, get_data

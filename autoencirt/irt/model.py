@@ -431,7 +431,12 @@ class BayesianModel(object):
         return
 
     def reconstitute(self, state):
-        pass
+        self.create_distributions()
+        for j, value in enumerate(
+                state['surrogate_vars']):
+            self.surrogate_distribution.trainable_variables[j].assign(
+                tf.cast(value, self.dtype))
+        #  self.set_calibration_expectations()
 
     def __setstate__(self, state):
         self.__dict__ = state.copy()
