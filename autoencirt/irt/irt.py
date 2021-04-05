@@ -4,13 +4,11 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from bayesianquilts.nn.dense import Dense, DenseHorseshoe
-# from bayesianquilts.model import BayesianModel
-from autoencirt.irt.model import BayesianModel
+from bayesianquilts.model import BayesianModel
 from bayesianquilts.util import (clip_gradients,
                                  fit_surrogate_posterior, run_chain)
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
-from bayesianquilts.nn.dense import Dense
 tfd = tfp.distributions
 
 
