@@ -216,7 +216,7 @@ class GRModel(IRTModel):
             ),  # difficulties0
             discriminations=(
                 lambda eta, xi: tfd.Independent(
-                    AbsHorseshoe(scale=eta*xi),
+                    AbsHorseshoe(scale=eta*xi*self.kappa_scale),
                     reinterpreted_batch_ndims=4
                 )),
             ddifficulties=tfd.Independent(
