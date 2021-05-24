@@ -17,3 +17,5 @@ pip install git+https://github.com/CC-RMD-EpiBio/autoencirt.git
 Here is an example training notebook: 
 
 Factorization of the Right-Wing-Authoritarianism Scale [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/CC-RMD-EpiBio/autoencirt/blob/master/notebooks/RWA.ipynb)
+
+Hi, this is my test edit
