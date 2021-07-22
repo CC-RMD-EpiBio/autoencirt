@@ -13,7 +13,7 @@ from autoencirt.irt import IRTModel
 from bayesianquilts.util import (
     build_trainable_InverseGamma_dist,
     build_trainable_normal_dist, build_surrogate_posterior,
-    run_chain)
+    run_chain, build_trainable_concentration_distribution)
 
 from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
 
@@ -41,26 +41,19 @@ class GRModel(IRTModel):
     """
     response_type = "polytomous"
 
-    def __init__(self, *args, **kwargs):
-        super(GRModel, self).__init__(*args, **kwargs)
-        if self.data is not None:
-            print("Computing a factor analysis")
-            _batch_size = min(self.data_cardinality, 100)
-            df = next(iter(self.data.shuffle(200).batch(self.data_cardinality)))
-            df = {
-                k: v.numpy() for k, v in df.items() if k in self.item_keys
-            }
-            df = pd.DataFrame(df)
-            df[df < 0] = np.nan
-            df = df.dropna()
-            if len(df) > 5:
-                fa = FactorAnalyzer(n_factors=self.dimensions)
-                fa.fit(df)
-                self.factor_loadings = fa.loadings_
-                
-            else:
-                print("Not doing a factor analysis because we have too much missingness")
-        self.create_distributions()
+    def __init__(self, data=None, **kwargs):
+        super(GRModel, self).__init__(data=data, **kwargs)
+
+        example = next(iter(data))
+        if not 'group' in example.keys():
+            self.create_distributions()
+        else:
+            # gather the groupings to pass them in
+            grouping_params = []
+            for batch in iter(data.batch(10000)):
+                grouping_params += [batch['grouping_parameters'].numpy()]
+            grouping_params = np.concatenate(grouping_params, axis=0)
+            self.create_distributions(grouping_params=grouping_params)
 
     def grm_model_prob(self, abilities, discriminations, difficulties):
         offsets = difficulties - abilities  # N x D x I x K-1
@@ -157,12 +150,13 @@ class GRModel(IRTModel):
         )
 
         log_probs = tf.reduce_sum(log_probs, axis=-1)
-        log_probs = tf.reduce_sum(log_probs, axis=-1)
+        # log_probs = tf.reduce_sum(log_probs, axis=-1)
 
         return log_probs
 
-    def create_distributions(self):
+    def create_distributions(self, grouping_params=None):
         """Joint probability with measure over observations
+        groupings: Vector of same size as the data
 
         Returns:
             tf.distributions.JointDistributionNamed -- Joint distribution
@@ -228,17 +222,6 @@ class GRModel(IRTModel):
                 ),
                 reinterpreted_batch_ndims=4
             ),
-            abilities=tfd.Independent(
-                tfd.Normal(
-                    loc=tf.zeros(
-                        (self.num_people, self.dimensions, 1, 1),
-                        dtype=self.dtype),
-                    scale=tf.ones(
-                        (self.num_people, self.dimensions, 1, 1),
-                        dtype=self.dtype)
-                ),
-                reinterpreted_batch_ndims=4
-            ),
             xi_a=tfd.Independent(
                 tfd.InverseGamma(
                     0.5*tf.ones(
@@ -279,9 +262,71 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=4
             )
         )
+        if grouping_params is not None:
+            grm_joint_distribution_dict['probs'] = tfd.Independent(
+                tfd.Dirichlet(
+                    tf.cast(grouping_params, self.dtype)
+                ),
+                reinterpreted_batch_ndims=1)
+            grm_joint_distribution_dict['mu_ability'] = lambda sigma: tfd.Independent(
+                tfd.Normal(
+                    loc=tf.zeros((self.dimensions, self.num_groups), self.dtype),
+                    scale=sigma),
+                reinterpreted_batch_ndims=2
+            )
+            self.bijectors['sigma'] = tfp.bijectors.Softplus()
+            grm_joint_distribution_dict['sigma'] = tfd.Independent(
+                tfd.HalfNormal(
+                    scale=0.5*tf.ones((self.dimensions, self.num_groups), self.dtype)),
+                reinterpreted_batch_ndims=2
+            )
+
+            grm_joint_distribution_dict['abilities'] = lambda probs, mu_ability, sigma: tfd.Independent(
+                tfd.Mixture(
+                    cat=tfd.Categorical(probs=probs),
+                    components=[
+                        tfd.Independent(
+                            tfd.Normal(
+                                loc=(
+                                    tf.squeeze(
+                                    mu_ability[..., tf.newaxis, :, 0:1]
+                                    + tf.zeros(
+                                        shape=(1, self.num_people,
+                                            self.dimensions, 1),
+                                        dtype=self.dtype)
+                                    )
+                                )[..., tf.newaxis, tf.newaxis],
+                                scale=(
+                                    tf.squeeze(
+                                    sigma[..., tf.newaxis, :, 0:1]
+                                    + tf.zeros(
+                                        shape=(1, self.num_people,
+                                            self.dimensions, 1),
+                                        dtype=self.dtype)
+                                )
+                                )[..., tf.newaxis, tf.newaxis]
+                            ),
+                            reinterpreted_batch_ndims=3),
+                        tfd.Independent(
+                            tfd.Normal(
+                                loc=(
+                                    tf.squeeze(
+                                    mu_ability[..., tf.newaxis, :, 1:2]
+                                    + tf.zeros((1, self.num_people,
+                                                self.dimensions, 1), self.dtype)
+                                ))[..., tf.newaxis, tf.newaxis],
+                                scale=(tf.squeeze(
+                                    sigma[..., tf.newaxis, :, 1:2]
+                                    + tf.zeros((1, self.num_people,
+                                                self.dimensions, 1), self.dtype)
+                                ))[..., tf.newaxis, tf.newaxis]
+                            ),
+                            reinterpreted_batch_ndims=3),
+                    ]
+                ), reinterpreted_batch_ndims=1
+            )
 
         """
-
             x=lambda abilities, discriminations, difficulties0, ddifficulties:
             tfd.Independent(
                 tfd.Categorical(
@@ -295,13 +340,19 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=2
             )
         """
-
+        discriminations0 = tfp.math.softplus_inverse(
+            tf.cast(self.discrimination_guess, self.dtype)
+        ) if self.discrimination_guess is not None else (
+            -2.*tf.ones(
+                (1, self.dimensions, self.num_items, 1),
+                dtype=self.dtype)
+        )
         surrogate_distribution_dict = {
             'abilities': build_trainable_normal_dist(
                 tf.zeros(
                     (self.num_people, self.dimensions, 1, 1),
                     dtype=self.dtype),
-                1e-1*tf.ones(
+                1e-2*tf.ones(
                     (self.num_people, self.dimensions, 1, 1),
                     dtype=self.dtype),
                 4
@@ -322,12 +373,10 @@ class GRModel(IRTModel):
             ),
             'discriminations': self.bijectors['discriminations'](
                 build_trainable_normal_dist(
-                    #tf.cast(
+                    # tf.cast(
                     #    (1.+np.abs(self.factor_loadings.T)),
                     #    self.dtype)[tf.newaxis, ..., tf.newaxis],
-                    -4.*tf.ones(
-                        (1, self.dimensions, self.num_items, 1),
-                        dtype=self.dtype),
+                    discriminations0,
                     1e-1*tf.ones(
                         (1, self.dimensions, self.num_items, 1),
                         dtype=self.dtype),
@@ -411,10 +460,42 @@ class GRModel(IRTModel):
             )
         )
 
+        if grouping_params is not None:
+            surrogate_distribution_dict = {
+                **surrogate_distribution_dict,
+                'mu_ability': build_trainable_normal_dist(
+                    tf.zeros(
+                        (self.dimensions, self.num_groups),
+                        dtype=self.dtype),
+                    1e-2*tf.ones(
+                        (self.dimensions, self.num_groups),
+                        dtype=self.dtype),
+                    2
+                ),
+                'sigma': build_trainable_InverseGamma_dist(
+                    tf.ones(
+                        (self.dimensions, self.num_groups),
+                        dtype=self.dtype),
+                    tf.ones(
+                        (self.dimensions, self.num_groups),
+                        dtype=self.dtype),
+                    2
+                ),
+                'probs': build_trainable_concentration_distribution(
+                    tf.cast(grouping_params, self.dtype),
+                    1
+                )
+            }
+
         self.joint_prior_distribution = tfd.JointDistributionNamed(
             grm_joint_distribution_dict)
         self.surrogate_distribution = tfd.JointDistributionNamed(
             surrogate_distribution_dict)
+
+        if self.vi_mode == 'asvi':
+            self.surrogate_distribution = tfp.experimental.vi.build_asvi_surrogate_posterior(
+                prior=self.joint_prior_distribution
+            )
 
         self.surrogate_vars = self.surrogate_distribution.variables
         self.var_list = list(surrogate_distribution_dict.keys())
@@ -491,7 +572,7 @@ class GRModel(IRTModel):
     def unormalized_log_prob(self, data, **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
         log_likelihood = self.log_likelihood(data, **params)
-        return log_prior + log_likelihood
+        return log_prior + tf.reduce_sum(log_likelihood, axis=-1)
 
 
 def main():
