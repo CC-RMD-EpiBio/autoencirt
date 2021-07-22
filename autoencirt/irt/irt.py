@@ -17,6 +17,7 @@ class IRTModel(BayesianModel):
     calibration_data = None
     num_people = None
     num_items = None
+    num_groups = None
     response_data = None
     response_cardinality = None
     dimensions = 1
@@ -37,11 +38,13 @@ class IRTModel(BayesianModel):
     xi_scale = .1
     kappa_scale = .1
     eta_scale = .1
+    vi_mode = 'advi'
 
     def __init__(
             self,
             item_keys,
             num_people,
+            num_groups = None,
             data=None,
             response_cardinality=5,
             person_key="person",
@@ -49,13 +52,16 @@ class IRTModel(BayesianModel):
             decay=0.25,
             positive_discriminations=True,
             missing_val=-9999,
+            full_rank=False,
             xi_scale=1e-2,
             eta_scale=1e-2,
             kappa_scale=1e-2,
             weight_exponent=1.0,
+            discrimination_guess = None,
+            vi_mode = 'advi',
             dtype=tf.float64):
         super(IRTModel, self).__init__(
-            data, None, None
+            data
         )
         self.dtype = dtype
 
@@ -71,6 +77,10 @@ class IRTModel(BayesianModel):
         self.weight_exponent = weight_exponent
         self.response_cardinality = response_cardinality
         self.num_people = num_people
+        self.full_rank = full_rank
+        self.discrimination_guess = discrimination_guess
+        self.vi_mode = vi_mode
+        self.num_groups = num_groups
         # self.create_distributions()
 
     def set_dimension(self, dim, decay=0.25):
