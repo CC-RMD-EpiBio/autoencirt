@@ -45,7 +45,7 @@ class GRModel(IRTModel):
         super(GRModel, self).__init__(data=data, **kwargs)
 
         example = next(iter(data))
-        if not 'group' in example.keys():
+        if not 'grouping_params' in example.keys():
             self.create_distributions()
         else:
             # gather the groupings to pass them in
@@ -270,7 +270,8 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=1)
             grm_joint_distribution_dict['mu_ability'] = lambda sigma: tfd.Independent(
                 tfd.Normal(
-                    loc=tf.zeros((self.dimensions, self.num_groups), self.dtype),
+                    loc=tf.zeros(
+                        (self.dimensions, self.num_groups), self.dtype),
                     scale=sigma),
                 reinterpreted_batch_ndims=2
             )
@@ -289,21 +290,21 @@ class GRModel(IRTModel):
                             tfd.Normal(
                                 loc=(
                                     tf.squeeze(
-                                    mu_ability[..., tf.newaxis, :, 0:1]
-                                    + tf.zeros(
-                                        shape=(1, self.num_people,
-                                            self.dimensions, 1),
-                                        dtype=self.dtype)
+                                        mu_ability[..., tf.newaxis, :, 0:1]
+                                        + tf.zeros(
+                                            shape=(1, self.num_people,
+                                                   self.dimensions, 1),
+                                            dtype=self.dtype)
                                     )
                                 )[..., tf.newaxis, tf.newaxis],
                                 scale=(
                                     tf.squeeze(
-                                    sigma[..., tf.newaxis, :, 0:1]
-                                    + tf.zeros(
-                                        shape=(1, self.num_people,
-                                            self.dimensions, 1),
-                                        dtype=self.dtype)
-                                )
+                                        sigma[..., tf.newaxis, :, 0:1]
+                                        + tf.zeros(
+                                            shape=(1, self.num_people,
+                                                   self.dimensions, 1),
+                                            dtype=self.dtype)
+                                    )
                                 )[..., tf.newaxis, tf.newaxis]
                             ),
                             reinterpreted_batch_ndims=3),
@@ -311,10 +312,10 @@ class GRModel(IRTModel):
                             tfd.Normal(
                                 loc=(
                                     tf.squeeze(
-                                    mu_ability[..., tf.newaxis, :, 1:2]
-                                    + tf.zeros((1, self.num_people,
-                                                self.dimensions, 1), self.dtype)
-                                ))[..., tf.newaxis, tf.newaxis],
+                                        mu_ability[..., tf.newaxis, :, 1:2]
+                                        + tf.zeros((1, self.num_people,
+                                                    self.dimensions, 1), self.dtype)
+                                    ))[..., tf.newaxis, tf.newaxis],
                                 scale=(tf.squeeze(
                                     sigma[..., tf.newaxis, :, 1:2]
                                     + tf.zeros((1, self.num_people,
@@ -325,21 +326,18 @@ class GRModel(IRTModel):
                     ]
                 ), reinterpreted_batch_ndims=1
             )
-
-        """
-            x=lambda abilities, discriminations, difficulties0, ddifficulties:
-            tfd.Independent(
-                tfd.Categorical(
-                    probs=self.grm_model_prob_d(
-                        abilities,
-                        discriminations,
-                        difficulties0,
-                        ddifficulties
-                    ),
-                    validate_args=True),
-                reinterpreted_batch_ndims=2
+        else:
+            grm_joint_distribution_dict['abilities'] = tfd.Independent(
+                tfd.Normal(
+                    loc=tf.zeros(
+                        (self.num_people, self.dimensions, 1, 1),
+                        dtype=self.dtype),
+                    scale=tf.ones(
+                        (self.num_people, self.dimensions, 1, 1),
+                        dtype=self.dtype)
+                ),
+                reinterpreted_batch_ndims=4
             )
-        """
         discriminations0 = tfp.math.softplus_inverse(
             tf.cast(self.discrimination_guess, self.dtype)
         ) if self.discrimination_guess is not None else (
@@ -352,7 +350,7 @@ class GRModel(IRTModel):
                 tf.zeros(
                     (self.num_people, self.dimensions, 1, 1),
                     dtype=self.dtype),
-                1e-2*tf.ones(
+                1e-3*tf.ones(
                     (self.num_people, self.dimensions, 1, 1),
                     dtype=self.dtype),
                 4
@@ -362,7 +360,7 @@ class GRModel(IRTModel):
                     tf.cast(
                         difficulties0[..., 1:]-difficulties0[..., :-1],
                         dtype=self.dtype),
-                    1e-2*tf.ones(
+                    1e-3*tf.ones(
                         (1,
                          self.dimensions,
                          self.num_items,
@@ -377,17 +375,17 @@ class GRModel(IRTModel):
                     #    (1.+np.abs(self.factor_loadings.T)),
                     #    self.dtype)[tf.newaxis, ..., tf.newaxis],
                     discriminations0,
-                    1e-1*tf.ones(
+                    5e-2*tf.ones(
                         (1, self.dimensions, self.num_items, 1),
                         dtype=self.dtype),
                     4
                 )
             ),
             'mu': build_trainable_normal_dist(
-                tf.ones(
+                tf.zeros(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
-                1e-2*tf.ones(
+                1e-3*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
                 4
@@ -421,7 +419,7 @@ class GRModel(IRTModel):
                 tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
-                1e-2*tf.ones(
+                1e-3*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
                 4
