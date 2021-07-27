@@ -96,7 +96,7 @@ class GRModel(IRTModel):
         return self.grm_model_prob(abilities, discriminations, difficulties)
 
     def log_likelihood(
-            self, responses, discriminations,
+            self, data, discriminations,
             difficulties0, ddifficulties,
             abilities, *args, **kwargs):
         # check if responses are a batch
@@ -111,9 +111,9 @@ class GRModel(IRTModel):
         batch_ndims = len(batch_shape)
 
         people = tf.cast(
-            responses[self.person_key], tf.int32)
+            data[self.person_key], tf.int32)
         choices = tf.concat(
-            [responses[i][:, tf.newaxis] for i in self.item_keys],
+            [data[i][:, tf.newaxis] for i in self.item_keys],
             axis=-1)
 
         bad_choices = tf.less(choices, 0)
