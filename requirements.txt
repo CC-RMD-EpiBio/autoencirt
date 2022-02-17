@@ -1,0 +1,10 @@
+arviz==0.11.4
+bayesianquilts.egg==info
+dill==0.3.4
+factor_analyzer==0.4.0
+numpy==1.22.2
+pandas==1.4.1
+scikit_learn==1.0.2
+setuptools==59.6.0
+tensorflow==2.8.0
+tensorflow_probability==0.16.0
