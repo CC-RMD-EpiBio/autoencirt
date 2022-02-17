@@ -43,6 +43,7 @@ class GRModel(IRTModel):
 
     def __init__(self, *args, **kwargs):
         super(GRModel, self).__init__(*args, **kwargs)
+        self.create_distributions()
 
     def grm_model_prob(self, abilities, discriminations, difficulties):
         offsets = difficulties - abilities  # N x D x I x K-1
