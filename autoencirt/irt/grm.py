@@ -41,19 +41,8 @@ class GRModel(IRTModel):
     """
     response_type = "polytomous"
 
-    def __init__(self, data=None, **kwargs):
-        super(GRModel, self).__init__(data=data, **kwargs)
-
-        example = next(iter(data))
-        if not 'grouping_params' in example.keys():
-            self.create_distributions()
-        else:
-            # gather the groupings to pass them in
-            grouping_params = []
-            for batch in iter(data.batch(10000)):
-                grouping_params += [batch['grouping_parameters'].numpy()]
-            grouping_params = np.concatenate(grouping_params, axis=0)
-            self.create_distributions(grouping_params=grouping_params)
+    def __init__(self, *args, **kwargs):
+        super(GRModel, self).__init__(*args, **kwargs)
 
     def grm_model_prob(self, abilities, discriminations, difficulties):
         offsets = difficulties - abilities  # N x D x I x K-1
@@ -95,7 +84,7 @@ class GRModel(IRTModel):
         difficulties = tf.cumsum(d0, axis=-1)
         return self.grm_model_prob(abilities, discriminations, difficulties)
 
-    def log_likelihood(
+    def predictive_distribution(
             self, data, discriminations,
             difficulties0, ddifficulties,
             abilities, *args, **kwargs):
@@ -152,7 +141,19 @@ class GRModel(IRTModel):
         log_probs = tf.reduce_sum(log_probs, axis=-1)
         # log_probs = tf.reduce_sum(log_probs, axis=-1)
 
-        return log_probs
+        return {
+            'log_likelihood': log_probs,
+            'rv': rv_responses
+        }
+
+    def log_likelihood(
+            self, data, discriminations,
+            difficulties0, ddifficulties,
+            abilities, *args, **kwargs):
+        prediction = self.predictive_distribution(data, discriminations,
+                                                  difficulties0, ddifficulties,
+                                                  abilities, *args, **kwargs)
+        return prediction['log_likelihood']
 
     def create_distributions(self, grouping_params=None):
         """Joint probability with measure over observations
