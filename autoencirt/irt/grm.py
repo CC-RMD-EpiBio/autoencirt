@@ -569,10 +569,10 @@ class GRModel(IRTModel):
     def loss(self, responses, scores):
         pass
 
-    def unormalized_log_prob(self, data, **params):
+    def unormalized_log_prob(self, data, prior_weight=1., **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
         log_likelihood = self.log_likelihood(data, **params)
-        return log_prior + tf.reduce_sum(log_likelihood, axis=-1)
+        return prior_weight*log_prior + tf.reduce_sum(log_likelihood, axis=-1)
 
 
 def main():
