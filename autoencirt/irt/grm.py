@@ -10,10 +10,10 @@ from factor_analyzer import (
     FactorAnalyzer)
 
 from autoencirt.irt import IRTModel
-from bayesianquilts.util import (
+from bayesianquilts.vi.advi import (
     build_trainable_InverseGamma_dist,
     build_trainable_normal_dist, build_surrogate_posterior,
-    run_chain, build_trainable_concentration_distribution)
+    build_trainable_concentration_distribution)
 
 from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
 
