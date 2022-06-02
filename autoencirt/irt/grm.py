@@ -10,10 +10,10 @@ from factor_analyzer import (
     FactorAnalyzer)
 
 from autoencirt.irt import IRTModel
-from bayesianquilts.util import (
+from bayesianquilts.vi.advi import (
     build_trainable_InverseGamma_dist,
     build_trainable_normal_dist, build_surrogate_posterior,
-    run_chain, build_trainable_concentration_distribution)
+    build_trainable_concentration_distribution)
 
 from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
 
@@ -569,10 +569,23 @@ class GRModel(IRTModel):
     def loss(self, responses, scores):
         pass
 
-    def unormalized_log_prob(self, data, **params):
+    def unormalized_log_prob(self, data, prior_weight=1., **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
         log_likelihood = self.log_likelihood(data, **params)
-        return log_prior + tf.reduce_sum(log_likelihood, axis=-1)
+        max_val = tf.reduce_max(log_likelihood)
+
+        finite_portion = tf.where(
+            tf.math.is_finite(log_likelihood),
+            log_likelihood,
+            tf.zeros_like(log_likelihood),
+        )
+        min_val = tf.reduce_min(finite_portion) - 1.0
+        log_likelihood = tf.where(
+            tf.math.is_finite(log_likelihood),
+            log_likelihood,
+            tf.ones_like(log_likelihood) * min_val,
+        )
+        return prior_weight*log_prior + tf.reduce_sum(log_likelihood, axis=-1)
 
 
 def main():
