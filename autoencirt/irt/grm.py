@@ -19,8 +19,7 @@ from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
 
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
-from tensorflow_probability.python.mcmc.transformed_kernel import (
-    make_log_det_jacobian_fn, make_transform_fn, make_transformed_log_prob)
+
 
 tfd = tfp.distributions
 
@@ -46,6 +45,10 @@ class GRModel(IRTModel):
         self.create_distributions()
 
     def grm_model_prob(self, abilities, discriminations, difficulties):
+        if self.include_independent:
+            abilities = tf.pad(
+                abilities, 
+                [(0, 0)]*(len(discriminations.shape) - 3) + [(1, 0)] + [(0, 0)]*2)
         offsets = difficulties - abilities  # N x D x I x K-1
         scaled = offsets*discriminations
         logits = 1.0/(1+tf.exp(scaled))
@@ -295,7 +298,8 @@ class GRModel(IRTModel):
                                         mu_ability[..., tf.newaxis, :, 0:1]
                                         + tf.zeros(
                                             shape=(1, self.num_people,
-                                                   self.dimensions, 1),
+                                                   self.dimensions if not self.include_independent else self.dimensions-1,
+                                                   1),
                                             dtype=self.dtype)
                                     )
                                 )[..., tf.newaxis, tf.newaxis],
@@ -304,7 +308,8 @@ class GRModel(IRTModel):
                                         sigma[..., tf.newaxis, :, 0:1]
                                         + tf.zeros(
                                             shape=(1, self.num_people,
-                                                   self.dimensions, 1),
+                                                   self.dimensions if not self.include_independent else self.dimensions-1,
+                                                   1),
                                             dtype=self.dtype)
                                     )
                                 )[..., tf.newaxis, tf.newaxis]
@@ -316,12 +321,14 @@ class GRModel(IRTModel):
                                     tf.squeeze(
                                         mu_ability[..., tf.newaxis, :, 1:2]
                                         + tf.zeros((1, self.num_people,
-                                                    self.dimensions, 1), self.dtype)
+                                                    self.dimensions if not self.include_independent else self.dimensions-1,
+                                                    1), self.dtype)
                                     ))[..., tf.newaxis, tf.newaxis],
                                 scale=(tf.squeeze(
                                     sigma[..., tf.newaxis, :, 1:2]
                                     + tf.zeros((1, self.num_people,
-                                                self.dimensions, 1), self.dtype)
+                                                self.dimensions if not self.include_independent else self.dimensions-1,
+                                                1), self.dtype)
                                 ))[..., tf.newaxis, tf.newaxis]
                             ),
                             reinterpreted_batch_ndims=3),
@@ -332,10 +339,10 @@ class GRModel(IRTModel):
             grm_joint_distribution_dict['abilities'] = tfd.Independent(
                 tfd.Normal(
                     loc=tf.zeros(
-                        (self.num_people, self.dimensions, 1, 1),
+                        (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                         dtype=self.dtype),
                     scale=tf.ones(
-                        (self.num_people, self.dimensions, 1, 1),
+                        (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                         dtype=self.dtype)
                 ),
                 reinterpreted_batch_ndims=4
@@ -350,10 +357,10 @@ class GRModel(IRTModel):
         surrogate_distribution_dict = {
             'abilities': build_trainable_normal_dist(
                 tf.zeros(
-                    (self.num_people, self.dimensions, 1, 1),
+                    (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                     dtype=self.dtype),
                 1e-3*tf.ones(
-                    (self.num_people, self.dimensions, 1, 1),
+                    (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                     dtype=self.dtype),
                 4
             ),
@@ -465,19 +472,19 @@ class GRModel(IRTModel):
                 **surrogate_distribution_dict,
                 'mu_ability': build_trainable_normal_dist(
                     tf.zeros(
-                        (self.dimensions, self.num_groups),
+                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
                     1e-2*tf.ones(
-                        (self.dimensions, self.num_groups),
+                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
                     2
                 ),
                 'sigma': build_trainable_InverseGamma_dist(
                     tf.ones(
-                        (self.dimensions, self.num_groups),
+                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
                     tf.ones(
-                        (self.dimensions, self.num_groups),
+                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
                     2
                 ),
