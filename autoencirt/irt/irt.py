@@ -13,75 +13,50 @@ tfd = tfp.distributions
 
 
 class IRTModel(BayesianModel):
-    response_type = None
-    calibration_data = None
-    num_people = None
-    num_items = None
-    num_groups = None
-    response_data = None
-    response_cardinality = None
-    dimensions = 1
-    weighted_likelihood = None
-    calibrated_expectations = None
-    calibrated_sd = None
-    calibrated_trait_scale = 1
-    bijectors = None
-    dimensional_decay = 0.25
-    surrogate_sample = None
-    xi_scale = None
-    kappa_scale = None
-    positive_discriminations = True
-    scoring_network = None
-    dtype = tf.float64
-    item_keys = []
-    weight_exponent = 1.0
-    xi_scale = .1
-    kappa_scale = .1
-    eta_scale = .1
-    vi_mode = 'advi'
 
     def __init__(
             self,
             item_keys,
             num_people,
-            num_groups = None,
+            num_groups=None,
             data=None,
-            response_cardinality=5,
             person_key="person",
             dim=1,
             decay=0.25,
             positive_discriminations=True,
             missing_val=-9999,
             full_rank=False,
-            xi_scale=1e-2,
             eta_scale=1e-2,
             kappa_scale=1e-2,
             weight_exponent=1.0,
-            discrimination_guess = None,
-            vi_mode = 'advi',
+            response_cardinality=5,
+            discrimination_guess=None,
+            include_independent=True,
+            vi_mode='advi',
             dtype=tf.float64):
         super(IRTModel, self).__init__(
             data
         )
         self.dtype = dtype
 
-        self.set_dimension(dim, decay)
         self.item_keys = item_keys
         self.num_items = len(item_keys)
         self.missing_val = missing_val
         self.person_key = person_key
         self.positive_discriminations = positive_discriminations
-        self.xi_scale = xi_scale
         self.eta_scale = eta_scale
         self.kappa_scale = kappa_scale
         self.weight_exponent = weight_exponent
         self.response_cardinality = response_cardinality
         self.num_people = num_people
         self.full_rank = full_rank
+        self.include_independent = include_independent,
         self.discrimination_guess = discrimination_guess
         self.vi_mode = vi_mode
         self.num_groups = num_groups
+        self.dtype = dtype
         # self.create_distributions()
+        self.set_dimension(dim, decay)
 
     def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim

@@ -19,8 +19,7 @@ from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
 
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
-from tensorflow_probability.python.mcmc.transformed_kernel import (
-    make_log_det_jacobian_fn, make_transform_fn, make_transformed_log_prob)
+
 
 tfd = tfp.distributions
 
@@ -46,6 +45,10 @@ class GRModel(IRTModel):
         self.create_distributions()
 
     def grm_model_prob(self, abilities, discriminations, difficulties):
+        if self.include_independent:
+            abilities = tf.pad(
+                abilities,
+                [(0, 0)]*(len(discriminations.shape) - 3) + [(1, 0)] + [(0, 0)]*2)
         offsets = difficulties - abilities  # N x D x I x K-1
         scaled = offsets*discriminations
         logits = 1.0/(1+tf.exp(scaled))
@@ -144,6 +147,7 @@ class GRModel(IRTModel):
 
         return {
             'log_likelihood': log_probs,
+            'discriminations': discriminations,
             'rv': rv_responses
         }
 
@@ -172,13 +176,13 @@ class GRModel(IRTModel):
         }
 
         self.bijectors['eta'] = tfp.bijectors.Softplus()
-        self.bijectors['xi'] = tfp.bijectors.Softplus()
+        self.bijectors['kappa'] = tfp.bijectors.Softplus()
 
         self.bijectors['discriminations'] = tfp.bijectors.Softplus()
         self.bijectors['ddifficulties'] = tfp.bijectors.Softplus()
 
         self.bijectors['eta_a'] = tfp.bijectors.Softplus()
-        self.bijectors['xi_a'] = tfp.bijectors.Softplus()
+        self.bijectors['kappa_a'] = tfp.bijectors.Softplus()
 
         K = self.response_cardinality
         difficulties0 = np.sort(
@@ -211,8 +215,8 @@ class GRModel(IRTModel):
                 reinterpreted_batch_ndims=4
             ),  # difficulties0
             discriminations=(
-                lambda eta, xi: tfd.Independent(
-                    AbsHorseshoe(scale=eta*xi*self.kappa_scale),
+                lambda eta, kappa: tfd.Independent(
+                    AbsHorseshoe(scale=kappa),
                     reinterpreted_batch_ndims=4
                 )),
             ddifficulties=tfd.Independent(
@@ -224,45 +228,32 @@ class GRModel(IRTModel):
                 ),
                 reinterpreted_batch_ndims=4
             ),
-            xi_a=tfd.Independent(
-                tfd.InverseGamma(
-                    0.5*tf.ones(
-                        (1, self.dimensions, 1, 1),
-                        dtype=self.dtype),
-                    tf.ones(
-                        (1, self.dimensions, 1, 1),
-                        dtype=self.dtype)/self.xi_scale**2
-                ),
-                reinterpreted_batch_ndims=4
-            ),
-            xi=lambda xi_a: tfd.Independent(
-                SqrtInverseGamma(
-                    0.5*tf.ones(
-                        (1, self.dimensions, 1, 1),
-                        dtype=self.dtype),
-                    1.0/xi_a
-                ),
-                reinterpreted_batch_ndims=4
-            ),
-            eta=lambda eta_a: tfd.Independent(
-                SqrtInverseGamma(
-                    0.5*tf.ones(
+            eta=tfd.Independent(
+                tfd.HalfNormal(
+                    scale=self.eta_scale*tf.ones(
                         (1, 1, self.num_items, 1), dtype=self.dtype),
-                    1.0/eta_a
                 ),
                 reinterpreted_batch_ndims=4
             ),
-            eta_a=tfd.Independent(
-                tfd.InverseGamma(
+            kappa=lambda kappa_a: tfd.Independent(
+                SqrtInverseGamma(
                     0.5*tf.ones(
-                        (1, 1, self.num_items, 1),
-                        dtype=self.dtype),
-                    tf.ones(
-                        (1, 1, self.num_items, 1),
-                        dtype=self.dtype)/self.eta_scale**2
+                        (1, self.dimensions, 1, 1), dtype=self.dtype),
+                    1.0/kappa_a
                 ),
                 reinterpreted_batch_ndims=4
-            )
+            ),
+            kappa_a=tfd.Independent(
+                tfd.InverseGamma(
+                    0.5*tf.ones(
+                        (1, self.dimensions, 1, 1),
+                        dtype=self.dtype),
+                    tf.ones(
+                        (1, self.dimensions, 1, 1),
+                        dtype=self.dtype)/self.kappa_scale**2
+                ),
+                reinterpreted_batch_ndims=4
+            ),
         )
         if grouping_params is not None:
             grm_joint_distribution_dict['probs'] = tfd.Independent(
@@ -295,7 +286,8 @@ class GRModel(IRTModel):
                                         mu_ability[..., tf.newaxis, :, 0:1]
                                         + tf.zeros(
                                             shape=(1, self.num_people,
-                                                   self.dimensions, 1),
+                                                   self.dimensions if not self.include_independent else self.dimensions-1,
+                                                   1),
                                             dtype=self.dtype)
                                     )
                                 )[..., tf.newaxis, tf.newaxis],
@@ -304,7 +296,8 @@ class GRModel(IRTModel):
                                         sigma[..., tf.newaxis, :, 0:1]
                                         + tf.zeros(
                                             shape=(1, self.num_people,
-                                                   self.dimensions, 1),
+                                                   self.dimensions if not self.include_independent else self.dimensions-1,
+                                                   1),
                                             dtype=self.dtype)
                                     )
                                 )[..., tf.newaxis, tf.newaxis]
@@ -316,12 +309,14 @@ class GRModel(IRTModel):
                                     tf.squeeze(
                                         mu_ability[..., tf.newaxis, :, 1:2]
                                         + tf.zeros((1, self.num_people,
-                                                    self.dimensions, 1), self.dtype)
+                                                    self.dimensions if not self.include_independent else self.dimensions-1,
+                                                    1), self.dtype)
                                     ))[..., tf.newaxis, tf.newaxis],
                                 scale=(tf.squeeze(
                                     sigma[..., tf.newaxis, :, 1:2]
                                     + tf.zeros((1, self.num_people,
-                                                self.dimensions, 1), self.dtype)
+                                                self.dimensions if not self.include_independent else self.dimensions-1,
+                                                1), self.dtype)
                                 ))[..., tf.newaxis, tf.newaxis]
                             ),
                             reinterpreted_batch_ndims=3),
@@ -332,10 +327,10 @@ class GRModel(IRTModel):
             grm_joint_distribution_dict['abilities'] = tfd.Independent(
                 tfd.Normal(
                     loc=tf.zeros(
-                        (self.num_people, self.dimensions, 1, 1),
+                        (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                         dtype=self.dtype),
                     scale=tf.ones(
-                        (self.num_people, self.dimensions, 1, 1),
+                        (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                         dtype=self.dtype)
                 ),
                 reinterpreted_batch_ndims=4
@@ -350,10 +345,10 @@ class GRModel(IRTModel):
         surrogate_distribution_dict = {
             'abilities': build_trainable_normal_dist(
                 tf.zeros(
-                    (self.num_people, self.dimensions, 1, 1),
+                    (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                     dtype=self.dtype),
                 1e-3*tf.ones(
-                    (self.num_people, self.dimensions, 1, 1),
+                    (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                     dtype=self.dtype),
                 4
             ),
@@ -395,18 +390,7 @@ class GRModel(IRTModel):
         }
         surrogate_distribution_dict = {
             **surrogate_distribution_dict,
-            'eta': self.bijectors['eta'](
-                build_trainable_InverseGamma_dist(
-                    0.5*tf.ones(
-                        (1, 1, self.num_items, 1),
-                        dtype=self.dtype),
-                    tf.ones(
-                        (1, 1, self.num_items, 1),
-                        dtype=self.dtype),
-                    4
-                )
-            ),
-            'xi': self.bijectors['xi'](
+            'kappa': self.bijectors['kappa'](
                 build_trainable_InverseGamma_dist(
                     0.5*tf.ones(
                         (1, self.dimensions, 1, 1),
@@ -428,7 +412,7 @@ class GRModel(IRTModel):
             )
         }
 
-        surrogate_distribution_dict["xi_a"] = self.bijectors['xi_a'](
+        surrogate_distribution_dict["kappa_a"] = self.bijectors['kappa_a'](
             build_trainable_InverseGamma_dist(
                 2*tf.ones(
                     (1, self.dimensions, 1, 1),
@@ -440,21 +424,11 @@ class GRModel(IRTModel):
             )
         )
 
-        surrogate_distribution_dict["eta_a"] = self.bijectors['eta_a'](
-            build_trainable_InverseGamma_dist(
-                2.0*tf.ones(
-                    (1, 1, self.num_items, 1),
-                    dtype=self.dtype),
-                tf.ones(
-                    (1, 1, self.num_items, 1),
-                    dtype=self.dtype),
-                4
-            )
-        )
-
         surrogate_distribution_dict["eta"] = self.bijectors['eta'](
-            build_trainable_InverseGamma_dist(
-                2.0*tf.ones((1, 1, self.num_items, 1), dtype=self.dtype),
+            build_trainable_normal_dist(
+                tfp.math.softplus_inverse(
+                    1e-4*tf.ones((1, 1, self.num_items, 1), dtype=self.dtype)),
+                self.eta_scale *
                 tf.ones((1, 1, self.num_items, 1), dtype=self.dtype),
                 4
             )
@@ -465,19 +439,19 @@ class GRModel(IRTModel):
                 **surrogate_distribution_dict,
                 'mu_ability': build_trainable_normal_dist(
                     tf.zeros(
-                        (self.dimensions, self.num_groups),
+                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
                     1e-2*tf.ones(
-                        (self.dimensions, self.num_groups),
+                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
                     2
                 ),
                 'sigma': build_trainable_InverseGamma_dist(
                     tf.ones(
-                        (self.dimensions, self.num_groups),
+                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
                     tf.ones(
-                        (self.dimensions, self.num_groups),
+                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
                     2
                 ),
@@ -569,10 +543,14 @@ class GRModel(IRTModel):
     def loss(self, responses, scores):
         pass
 
-    def unormalized_log_prob(self, data, prior_weight=1., **params):
+    def unormalized_log_prob(self, data, entropy_penalty=1., prior_weight=1., **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
-        log_likelihood = self.log_likelihood(data, **params)
-        max_val = tf.reduce_max(log_likelihood)
+        prediction = self.predictive_distribution(data, **params)
+        log_likelihood = prediction["log_likelihood"]
+        weights = prediction["discriminations"]
+        weights = weights/tf.reduce_sum(weights, axis=-3, keepdims=True)
+        entropy = -tf.math.xlogy(weights, weights)/params['eta']
+        entropy = tf.reduce_sum(entropy, axis=[-1, -2, -3, -4])
 
         finite_portion = tf.where(
             tf.math.is_finite(log_likelihood),
@@ -585,7 +563,7 @@ class GRModel(IRTModel):
             log_likelihood,
             tf.ones_like(log_likelihood) * min_val,
         )
-        return prior_weight*log_prior + tf.reduce_sum(log_likelihood, axis=-1)
+        return prior_weight*(log_prior - entropy) + tf.reduce_sum(log_likelihood, axis=-1)
 
 
 def main():
