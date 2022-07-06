@@ -26,7 +26,6 @@ class IRTModel(BayesianModel):
             positive_discriminations=True,
             missing_val=-9999,
             full_rank=False,
-            xi_scale=1e-2,
             eta_scale=1e-2,
             kappa_scale=1e-2,
             weight_exponent=1.0,
@@ -45,7 +44,6 @@ class IRTModel(BayesianModel):
         self.missing_val = missing_val
         self.person_key = person_key
         self.positive_discriminations = positive_discriminations
-        self.xi_scale = xi_scale
         self.eta_scale = eta_scale
         self.kappa_scale = kappa_scale
         self.weight_exponent = weight_exponent
