@@ -543,7 +543,7 @@ class GRModel(IRTModel):
     def loss(self, responses, scores):
         pass
 
-    def unormalized_log_prob(self, data, entropy_penalty=1., prior_weight=1., **params):
+    def unormalized_log_prob(self, data, entropy_penalty=1., prior_weight=tf.constant(1.), **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
         prediction = self.predictive_distribution(data, **params)
         log_likelihood = prediction["log_likelihood"]
@@ -563,7 +563,7 @@ class GRModel(IRTModel):
             log_likelihood,
             tf.ones_like(log_likelihood) * min_val,
         )
-        return prior_weight*(log_prior - entropy) + tf.reduce_sum(log_likelihood, axis=-1)
+        return tf.cast(prior_weight, log_prior.dtype)*(log_prior - entropy) + tf.reduce_sum(log_likelihood, axis=-1)
 
 
 def main():

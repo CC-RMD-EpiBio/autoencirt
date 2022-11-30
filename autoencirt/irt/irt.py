@@ -37,6 +37,7 @@ class IRTModel(BayesianModel):
         super(IRTModel, self).__init__(
             data
         )
+
         self.dtype = dtype
 
         self.item_keys = item_keys
@@ -50,14 +51,14 @@ class IRTModel(BayesianModel):
         self.response_cardinality = response_cardinality
         self.num_people = num_people
         self.full_rank = full_rank
-        self.include_independent = include_independent,
+        self.include_independent = include_independent
         self.discrimination_guess = discrimination_guess
         self.vi_mode = vi_mode
         self.num_groups = num_groups
         self.dtype = dtype
         # self.create_distributions()
         self.set_dimension(dim, decay)
-
+  
     def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim
         self.dimensional_decay = decay
@@ -66,6 +67,11 @@ class IRTModel(BayesianModel):
         )[tf.newaxis, :, tf.newaxis, tf.newaxis]
 
     def set_params_from_samples(self, samples):
+        """_summary_
+
+        Args:
+            samples (_type_): _description_
+        """
         try:
             for k in self.var_list:
                 self.surrogate_sample[k] = samples[k]
