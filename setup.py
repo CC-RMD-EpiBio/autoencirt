@@ -24,16 +24,9 @@ setuptools.setup(
         'dill>=0.3.1.1',
         'matplotlib>=3.1',
         'factor-analyzer',
-        'arviz>=0.10.0',
-        'numpy>=1.17',
-        'pandas>=1.0.0, <1.2.0',
-        'scipy>=1.4.1',
-        'tensorflow>=2.4.0',
-        'tensorflow-probability>=0.12.1',
-        'tensorflow-addons>=0.12.0',
-        'bayesianquilts@git+https://github.com/mederrata/bayesianquilts.git#egg=bayesianquilts-0.0.1'
+        'bayesianquilts@git+https://github.com/mederrata/bayesianquilts.git'
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.8',
     scripts=[
         'autoencirt/scripts/rwas_test.py',
         'autoencirt/scripts/test_nn.py'
