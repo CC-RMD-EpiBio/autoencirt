@@ -110,23 +110,9 @@ class IRTModel(BayesianModel):
             dnn_fun = dnn.build_network(dnn_params, tf.nn.relu)
             return -ability_distribution.log_prob(dnn_fun(self.response_data))
 
-    def simulate_data(self, shape, sparsity=0.5):
-        sampling_rv = tfd.Independent(
-            tfd.Normal(
-                loc=tf.reduce_mean(
-                    self.calibrated_expectations['abilities'],
-                    axis=0),
-                scale=tf.math.reduce_std(
-                    self.calibrated_expectations['abilities'],
-                    axis=0)
-            ),
-            reinterpreted_batch_ndims=2
-        )
-        trait_samples = sampling_rv.sample(shape)
+    def simulate_data(self):
         discrimination = self.calibrated_expectations['discriminations']
-        rv = tfd.Bernoulli(
-            tf.ones_like(discrimination, dtype=self.dtype)*(1.0-sparsity))
-        discrimination = discrimination*tf.cast(rv.sample(), dtype=self.dtype)
+
         probs = self.grm_model_prob_d(
             self.calibrated_expectations['abilities'],
             discrimination,
@@ -137,7 +123,7 @@ class IRTModel(BayesianModel):
             probs=probs
         )
         responses = response_rv.sample()
-        return responses, discrimination, trait_samples
+        return responses
 
     def unormalized_log_prob(self, **x):
         if self.auxiliary_parameterization:
