@@ -5,7 +5,6 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from bayesianquilts.model import BayesianModel
 from bayesianquilts.nn.dense import Dense, DenseHorseshoe
-from bayesianquilts.util import clip_gradients, run_chain
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
 
@@ -110,11 +109,12 @@ class IRTModel(BayesianModel):
             dnn_fun = dnn.build_network(dnn_params, tf.nn.relu)
             return -ability_distribution.log_prob(dnn_fun(self.response_data))
 
-    def simulate_data(self):
+    def simulate_data(self, abilities=None):
         discrimination = self.calibrated_expectations['discriminations']
-
+        if abilities is None:
+            abilities = self.calibrated_expectations['abilities']
         probs = self.grm_model_prob_d(
-            self.calibrated_expectations['abilities'],
+            abilities,
             discrimination,
             self.calibrated_expectations['difficulties0'],
             self.calibrated_expectations['ddifficulties']

@@ -350,7 +350,8 @@ class GRModel(IRTModel):
                 1e-3*tf.ones(
                     (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
                     dtype=self.dtype),
-                4
+                4,
+                name='abilities'
             ),
             'ddifficulties': self.bijectors['ddifficulties'](
                 build_trainable_normal_dist(
@@ -363,7 +364,8 @@ class GRModel(IRTModel):
                          self.num_items,
                          self.response_cardinality-2
                          ), dtype=self.dtype),
-                    4
+                    4,
+                    name="ddifficulties"
                 )
             ),
             'discriminations': self.bijectors['discriminations'](
@@ -375,7 +377,8 @@ class GRModel(IRTModel):
                     5e-2*tf.ones(
                         (1, self.dimensions, self.num_items, 1),
                         dtype=self.dtype),
-                    4
+                    4,
+                    name="discriminations"
                 )
             ),
             'mu': build_trainable_normal_dist(
@@ -385,7 +388,8 @@ class GRModel(IRTModel):
                 1e-3*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
-                4
+                4,
+                name="mu"
             )
         }
         surrogate_distribution_dict = {
@@ -398,7 +402,8 @@ class GRModel(IRTModel):
                     tf.ones(
                         (1, self.dimensions, 1, 1),
                         dtype=self.dtype),
-                    4
+                    4,
+                    name='kappa'
                 )
             ),
             'difficulties0': build_trainable_normal_dist(
@@ -408,7 +413,8 @@ class GRModel(IRTModel):
                 1e-3*tf.ones(
                     (1, self.dimensions, self.num_items, 1),
                     dtype=self.dtype),
-                4
+                4,
+                name='difficulties0'
             )
         }
 
@@ -420,7 +426,8 @@ class GRModel(IRTModel):
                 tf.ones(
                     (1, self.dimensions, 1, 1),
                     dtype=self.dtype),
-                4
+                4,
+                name='kappa_a'
             )
         )
 
@@ -430,7 +437,8 @@ class GRModel(IRTModel):
                     1e-4*tf.ones((1, 1, self.num_items, 1), dtype=self.dtype)),
                 self.eta_scale *
                 tf.ones((1, 1, self.num_items, 1), dtype=self.dtype),
-                4
+                4,
+                name='eta'
             )
         )
 
@@ -444,7 +452,8 @@ class GRModel(IRTModel):
                     1e-2*tf.ones(
                         (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
-                    2
+                    2,
+                    name='mu_ability'
                 ),
                 'sigma': build_trainable_InverseGamma_dist(
                     tf.ones(
@@ -453,11 +462,13 @@ class GRModel(IRTModel):
                     tf.ones(
                         (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
                         dtype=self.dtype),
-                    2
+                    2,
+                    name='sigma'
                 ),
                 'probs': build_trainable_concentration_distribution(
                     tf.cast(grouping_params, self.dtype),
-                    1
+                    1,
+                    name='probs'
                 )
             }
 
@@ -543,7 +554,7 @@ class GRModel(IRTModel):
     def loss(self, responses, scores):
         pass
 
-    def unormalized_log_prob(self, data, entropy_penalty=1., prior_weight=tf.constant(1.), **params):
+    def unormalized_log_prob(self, data, prior_weight=tf.constant(1.), **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
         prediction = self.predictive_distribution(data, **params)
         log_likelihood = prediction["log_likelihood"]
