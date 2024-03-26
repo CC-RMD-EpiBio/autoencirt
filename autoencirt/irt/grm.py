@@ -20,13 +20,10 @@ from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
 
+from tensorflow_probability.python import distributions as tfd
+from tensorflow_probability.python import bijectors as tfb
+from tensorflow_probability.python.distributions import LogNormal
 
-tfd = tfp.distributions
-
-tfd = tfp.distributions
-tfb = tfp.bijectors
-
-LogNormal = tfd.LogNormal
 
 
 class GRModel(IRTModel):
@@ -550,9 +547,6 @@ class GRModel(IRTModel):
             axis=0)
         std = tf.sqrt(mean2-mean**2)
         return mean, std, w, trait_samples
-
-    def loss(self, responses, scores):
-        pass
 
     def unormalized_log_prob(self, data, prior_weight=tf.constant(1.), **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
