@@ -453,11 +453,20 @@ class FactorizedGRModel(GRModel):
     def transform(self, params):
         # re-assemble the discriminations
         p_shape = params["discriminations_0"].shape.as_list()
-        discriminations = tf.zeros(
-            p_shape[:-3] + [self.dim] + [self.num_items, 1], dtype=self.dtype
-        )
+        discriminations = []
         for j, indices in enumerate(self.scale_indices):
-            pass
+            scatter_ndx = [[k] for k in self.scale_indices[j]]
+            update = tf.transpose(params[f"discriminations_{j}"], [3, 0, 1, 2, 4])[
+                :, :, 0, 0, 0
+            ]
+            discriminations += [
+                tf.scatter_nd(scatter_ndx, update, shape=[self.num_items] + p_shape[:-4])[..., tf.newaxis]
+            ]
+        discriminations = tf.concat(discriminations, axis=-1)
+        _shape = discriminations.shape.as_list()
+        _rank = len(_shape)
+        discriminations = tf.transpose(discriminations, [t for t in range(1, _rank-1)] + [_rank-1, 0])
+        discriminations = discriminations[..., tf.newaxis, :, :, tf.newaxis]
         params["discriminations"] = discriminations
         return params
 
