@@ -17,6 +17,7 @@ from bayesianquilts.vi.advi import (
 )
 
 from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
+from bayesianquilts.util import DummyObject, batched_minimize
 
 from tensorflow_probability.python import util as tfp_util
 from tensorflow_probability.python.bijectors import softplus as softplus_lib
@@ -496,3 +497,28 @@ class FactorizedGRModel(GRModel):
             reinterpreted_batch_ndims=4,
         )
         return out
+
+    def predictive_distribution(self, data, **params):
+        params = self.transform(params)
+        return super(FactorizedGRModel, self).predictive_distribution(data, **params)
+
+    def fit_projection(
+        self, other, batched_data_factory, num_steps, samples=32, **kwargs
+    ):
+        def objective(data):
+            this_prediction = self.predictive_distribution(
+                data, **self.sample(samples)
+            )["rv"]
+            other_prediction = other.predictive_distribution(
+                data, **other.sample(samples)
+            )["rv"]
+            delta = other_prediction.kl_divergence(this_prediction)
+            return tf.reduce_mean(delta)
+
+        return batched_minimize(
+            objective,
+            batched_data_factory=batched_data_factory,
+            num_steps=num_steps,
+            trainable_variables=self.surrogate_distribution.variables,
+            **kwargs,
+        )
