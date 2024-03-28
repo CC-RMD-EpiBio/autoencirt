@@ -125,15 +125,6 @@ class IRTModel(BayesianModel):
         responses = response_rv.sample()
         return responses
 
-    def unormalized_log_prob(self, **x):
-        if self.auxiliary_parameterization:
-            return self.joint_log_prob_auxiliary(
-                responses=self.calibration_data,
-                **x
-
-            )
-        else:
-            return self.joint_log_prob(
-                responses=self.calibration_data,
-                **x
-            )
+            
+    def project_discriminations(self, steps=1000):
+        pass
