@@ -570,7 +570,15 @@ class GRModel(IRTModel):
         )
         return tf.cast(prior_weight, log_prior.dtype)*(log_prior - entropy) + tf.reduce_sum(log_likelihood, axis=-1)
 
+    def dumpyaml(self, item_info, scale_info):
+        """
 
+        Args:
+            item_info (_type_): _description_
+            scale_info (_type_): _description_
+        """
+        
+        pass
 def main():
     pass
 
