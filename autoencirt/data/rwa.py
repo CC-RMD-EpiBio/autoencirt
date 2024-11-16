@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from os import path, system
+
 import pandas as pd
 import tensorflow as tf
 
@@ -32,7 +33,7 @@ item_text = [
     "Homosexuals and feminists should be praised for being brave enough to defy \"traditional family values.\"",
     "This country would work a lot better if certain groups of troublemakers would just shut up and accept their group's traditional place in society."]
 
-reverse = [
+to_reverse = [
     3, 5, 7, 8, 10, 12, 14, 17, 19, 20
 ]
 
@@ -52,9 +53,12 @@ def get_data(reorient=False, pandas=False):
         system("unzip RWAS.zip")
     data = pd.read_csv('RWAS/data.csv', low_memory=False)
     data = data.loc[:, map(lambda x: 'Q'+str(x), list(range(1, 23)))]
+    data = data - 1
     num_people = len(data)
     if reorient:
-        data.iloc[:, reverse] = 9 - data.iloc[:, reverse]
+        data.iloc[:, to_reverse] = 8 - data.iloc[:, to_reverse]
+        
+    data[data > 8] = -1
     data['person'] = data.index
     if pandas:
         return data, num_people
