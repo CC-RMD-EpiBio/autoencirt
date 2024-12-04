@@ -2,7 +2,10 @@
 
 This code aims to factor item response data using the graded response model and sparse coding.
 
-Check out this manuscript [https://arxiv.org/abs/1912.02351](https://arxiv.org/abs/1912.02351) for details.
+Check out these two manuscripts for details:
+
+* [https://arxiv.org/abs/1912.02351](https://arxiv.org/abs/1912.02351)
+* https://proceedings.mlr.press/v206/chang23a.html
 =======
 
 ## Installation
