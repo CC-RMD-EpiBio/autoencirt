@@ -1,29 +1,15 @@
 #!/usr/bin/env python3
-import itertools
 
 import numpy as np
-import pandas as pd
 import tensorflow as tf
 import tensorflow_probability as tfp
-
-from factor_analyzer import (
-    FactorAnalyzer)
+from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
+from bayesianquilts.vi.advi import (build_trainable_concentration_distribution,
+                                    build_trainable_InverseGamma_dist,
+                                    build_trainable_normal_dist)
+from tensorflow_probability.python import distributions as tfd
 
 from autoencirt.irt import IRTModel
-from bayesianquilts.vi.advi import (
-    build_trainable_InverseGamma_dist,
-    build_trainable_normal_dist, build_surrogate_posterior,
-    build_trainable_concentration_distribution)
-
-from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
-
-from tensorflow_probability.python import util as tfp_util
-from tensorflow_probability.python.bijectors import softplus as softplus_lib
-
-from tensorflow_probability.python import distributions as tfd
-from tensorflow_probability.python import bijectors as tfb
-from tensorflow_probability.python.distributions import LogNormal
-
 
 
 class GRModel(IRTModel):
@@ -213,7 +199,7 @@ class GRModel(IRTModel):
             ),  # difficulties0
             discriminations=(
                 lambda eta, kappa: tfd.Independent(
-                    AbsHorseshoe(scale=kappa),
+                    AbsHorseshoe(scale=kappa*eta),
                     reinterpreted_batch_ndims=4
                 )),
             ddifficulties=tfd.Independent(
