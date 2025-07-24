@@ -1,30 +1,17 @@
 #!/usr/bin/env python3
-import itertools
 
 import numpy as np
-import pandas as pd
-import tensorflow as tf
-import tensorflow_probability as tfp
-
-from factor_analyzer import FactorAnalyzer
-
-from autoencirt.irt import IRTModel, GRModel
-from bayesianquilts.vi.advi import (
-    build_trainable_InverseGamma_dist,
-    build_trainable_normal_dist,
-    build_surrogate_posterior,
-    build_trainable_concentration_distribution,
-)
-
-from bayesianquilts.distributions import SqrtInverseGamma, AbsHorseshoe
-from bayesianquilts.util import DummyObject, batched_minimize
-
-from tensorflow_probability.python import util as tfp_util
-from tensorflow_probability.python.bijectors import softplus as softplus_lib
-
+import tensorflow_probability.substrates.jax as tfp
+from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
+from bayesianquilts.util import batched_minimize
+from bayesianquilts.vi.advi import (build_trainable_concentration_distribution,
+                                    build_trainable_InverseGamma_dist,
+                                    build_trainable_normal_dist)
 from tensorflow_probability.python import distributions as tfd
-from tensorflow_probability.python import bijectors as tfb
-from tensorflow_probability.python.distributions import LogNormal
+from tensorflow_probability.substrates.jax import distributions as tfd
+from tensorflow_probability.substrates.jax import tf2jax as tf
+
+from autoencirt.irt import GRModel
 
 
 class FactorizedGRModel(GRModel):

@@ -1,14 +1,8 @@
-from itertools import product
 
-import numpy as np
-import tensorflow as tf
-import tensorflow_probability as tfp
 from bayesianquilts.model import BayesianModel
-from bayesianquilts.nn.dense import Dense, DenseHorseshoe
-from tensorflow_probability.python import util as tfp_util
-from tensorflow_probability.python.bijectors import softplus as softplus_lib
-
-tfd = tfp.distributions
+from bayesianquilts.nn.dense import Dense
+from tensorflow_probability.substrates.jax import distributions as tfd
+from tensorflow_probability.substrates.jax import tf2jax as tf
 
 
 class IRTModel(BayesianModel):
