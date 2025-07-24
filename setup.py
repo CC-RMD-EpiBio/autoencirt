@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="autoencirt",  # Replace with your own username
-    version="0.0.7",
+    version="0.1",
     author="Josh Chang",
     author_email="josh@mederrata.com",
     description="",
@@ -26,7 +26,7 @@ setuptools.setup(
         'factor-analyzer',
         'bayesianquilts@git+https://github.com/mederrata/bayesianquilts.git'
     ],
-    python_requires='>=3.8',
+    python_requires='>=3.11',
     scripts=[
         'autoencirt/scripts/rwas_test.py',
         'autoencirt/scripts/test_nn.py'
