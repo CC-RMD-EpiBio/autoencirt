@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from os import path, system
 
+import grain
 import pandas as pd
 
 if not path.exists('RWAS/data.csv'):
