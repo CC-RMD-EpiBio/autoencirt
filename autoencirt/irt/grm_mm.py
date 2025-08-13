@@ -1,9 +1,17 @@
 import numpy as np
 from jax import numpy as jnp
 from jax.nn import one_hot, sigmoid
+from jax.random import PRNGKey, categorical, normal
 
 dsigmoid = lambda x: sigmoid(x) * (1 - sigmoid(x))
 ddsigmoid = lambda x: sigmoid(x) * (1 - sigmoid(x)) * (1 - 2 * sigmoid(x))
+
+
+def p(abilities, difficulties, discriminations):
+    p_cum = sigmoid(discriminations * (abilities - difficulties))
+    p_cum = jnp.pad(p_cum, ((0, 0), (0, 0), (1, 0)), constant_values=1)
+    p_cum = jnp.pad(p_cum, ((0, 0), (0, 0), (0, 1)), constant_values=0)
+    return p_cum[..., :-1] - p_cum[..., 1:]
 
 
 #
@@ -17,12 +25,18 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
     p_cum = sigmoid(discriminations * (abilities - difficulties))  # Pr(x>=k)
     # first partials, will be N x I x K x d where d is the dimension of the parameter
     # d_cum_abilites will be N x I x K x N
-    dp_cum_dtheta = (p_cum * (1 - p_cum)) * discriminations
-    dp_cum_dtau = -(p_cum * (1 - p_cum)) * discriminations
-    dp_cum_dlambda = (p_cum * (1 - p_cum)) * (abilities - difficulties)
+    dp_cum_dtheta = (p_cum * (1 - p_cum)) * discriminations  # theta is abilities
+    dp_cum_dtau = -(p_cum * (1 - p_cum)) * discriminations  # tau is difficulty
+    dp_cum_dlambda = (p_cum * (1 - p_cum)) * (
+        abilities - difficulties
+    )  # lambda is discriminations
 
-    dp_dtau_0 = jnp.pad(dp_cum_dtau, ((0, 0), (0, 0), (1, 0)), constant_values=0)
-    dp_dtau_1 = -jnp.pad(dp_cum_dtau, ((0, 0), (0, 0), (0, 1)), constant_values=0)
+    dp_dtau_0 = jnp.pad(
+        dp_cum_dtau, ((0, 0), (0, 0), (1, 0)), constant_values=0
+    )  # tau_{k-1}
+    dp_dtau_1 = -jnp.pad(
+        dp_cum_dtau, ((0, 0), (0, 0), (0, 1)), constant_values=0
+    )  # tau_k
 
     # second partials
     # Diagonal terms
@@ -61,12 +75,11 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
         dp_cum_dlambda, ((0, 0), (0, 0), (1, 1)), constant_values=0
     )
 
-    dp_dabilities = dp_cum_dabilities[:, :, 1:, ...] - dp_cum_dabilities[:, :, :-1, ...]
-    dp_ddifficulties = dp_cum_ddifficulties[:, :, 1:, ...]
-    dp_ddifficulties = -dp_cum_ddifficulties[:, :, :-1, ...]
+    dp_dabilities = dp_cum_dabilities[:, :, :-1, ...] - dp_cum_dabilities[:, :, 1:, ...]
+
     dp_ddiscrimintations = (
-        dp_cum_ddiscrimintations[:, :, 1:, ...]
-        - dp_cum_ddiscrimintations[:, :, :-1, ...]
+        dp_cum_ddiscrimintations[:, :, :-1, ...]
+        - dp_cum_ddiscrimintations[:, :, 1:, ...]
     )
 
     # diagonal hessian
@@ -105,28 +118,28 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
     )
 
     d2p_dabilities = (
-        d2p_cum_dabilities2[:, :, 1:, ...] - d2p_cum_dabilities2[:, :, :-1, ...]
+        d2p_cum_dabilities2[:, :, :-1, ...] - d2p_cum_dabilities2[:, :, 1:, ...]
     )
     d2p_ddiscriminations = (
-        d2p_cum_ddiscrimintations2[:, :, 1:, ...]
-        - d2p_cum_ddiscrimintations2[:, :, :-1, ...]
+        d2p_cum_ddiscrimintations2[:, :, :-1, ...]
+        - d2p_cum_ddiscrimintations2[:, :, 1:, ...]
     )
 
     d2p_dabilities_ddifficulties = (
-        d2p_cum_dabilities_difficulties[:, :, 1:, ...]
-        - d2p_cum_dabilities_difficulties[:, :, :-1, ...]
+        d2p_cum_dabilities_difficulties[:, :, :-1, ...]
+        - d2p_cum_dabilities_difficulties[:, :, 1:, ...]
     )
     d2p_dabilities_ddiscrimintations = (
-        d2p_cum_dabilities_discriminations[:, :, 1:, ...]
-        - d2p_cum_dabilities_discriminations[:, :, :-1, ...]
+        d2p_cum_dabilities_discriminations[:, :, :-1, ...]
+        - d2p_cum_dabilities_discriminations[:, :, 1:, ...]
     )
 
     d2p_ddifficulties_ddiscrimintations = (
-        d2p_cum_ddifficulties_discriminations[:, :, 1:, ...]
-        - d2p_cum_ddifficulties_discriminations[:, :, :-1, ...]
+        d2p_cum_ddifficulties_discriminations[:, :, :-1, ...]
+        - d2p_cum_ddifficulties_discriminations[:, :, 1:, ...]
     )
 
-    p = p_cum[..., 1:] - p_cum[..., :-1]
+    p = p_cum[..., :-1] - p_cum[..., 1:]
 
     # compute derivatives
 
@@ -171,11 +184,22 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
 
 def a_b(abilities, difficulties, discriminations):
     vals = p_nik(abilities, difficulties, discriminations)
-    k = [(k, k) for k in vals["grad(log(p))"].keys()]
-    diagonals = [vals["grad(grad(log(p)))"][j] for j in k]
-    a = jnp.min(jnp.stack(diagonals, axis=-1), axis=-1)
+    vars = ["abilities", "discriminations", "difficulties0", "difficulties1"]
+    # H = [[ vals["grad(grad(log(p)))"].get((l1, l2), vals["grad(grad(log(p)))"].get((l2, l1))) for l1 in vars] for l2 in vars]
+    H_abssum = [
+        [
+            vals["grad(grad(log(p)))"].get(
+                (l1, l2), vals["grad(grad(log(p)))"].get((l2, l1))
+            )
+            for l1 in vars
+        ]
+        for l2 in vars
+    ]
+    H_abssum = [jnp.sum(jnp.abs(jnp.stack(h, axis=-1)), axis=-1) for h in H_abssum]
+    H_abssum = jnp.max(jnp.stack(H_abssum, axis=-1), axis=-1)
+    a = -H_abssum
 
-    b4 = vals["grad(p)"]["discriminations"] - a * discriminations**2
+    b4 = vals["grad(log(p))"]["discriminations"] - a * discriminations**2
     tau0 = jnp.pad(
         difficulties[..., :-1], ((0, 0), (0, 0), (1, 0)), constant_values=0
     )  # \tau_{k-1}
@@ -183,8 +207,8 @@ def a_b(abilities, difficulties, discriminations):
     tau1 = jnp.pad(
         difficulties[..., 1:], ((0, 0), (0, 0), (0, 1)), constant_values=0
     )  # \tau_k
-    b2 = vals["grad(p)"]["difficulties0"][..., 1:] - a[..., 1:] * tau0**2
-    b3 = vals["grad(p)"]["difficulties1"][..., :-1] - a[..., :-1] * tau1**2
+    b2 = vals["grad(log(p))"]["difficulties0"][..., :-1] - a[..., :-1] * tau0**2
+    b3 = vals["grad(log(p))"]["difficulties1"][..., 1:] - a[..., 1:] * tau1**2
 
     return a, b2, b3, b4, vals
 
@@ -193,40 +217,64 @@ def params_next(X, abilities, difficulties, discriminations):
     a, b2, b3, b4, vals = a_b(abilities, difficulties, discriminations)
     # calculate next lambda values
     observed = (X >= 0).astype(int)
-    _X = one_hot(X, vals['K'])
-    discrim_numerator = jnp.sum(b4*_X, axis=[0, 2]) + jnp.sum(
+    _X = one_hot(X, vals["K"])
+    discrim_numerator = jnp.sum(b4 * _X, axis=[0, 2]) + jnp.sum(
         jnp.sum(b4 * vals["p"], axis=-1) * (1 - observed), axis=0
     )
-    discrim_denominator = jnp.sum(a*_X, axis=[0, 2]) + jnp.sum(
-        jnp.sum(a * vals["p"], axis=-1) * (1 - observed), axis=0
+    discrim_denominator = (
+        jnp.sum(a * _X, axis=[0, 2])
+        + jnp.sum(jnp.sum(a * vals["p"], axis=-1) * (1 - observed), axis=0)
+        - 2 / (1 + discriminations[0, :, 0] ** 2)
     )
-    discrim = -discrim_numerator/discrim_denominator
-    
-    difficulty_midpoints = (difficulties[..., 1:] + difficulties[..., :-1])/2
-    difficulty_midpoints = jnp.pad(difficulty_midpoints, ((0,0), (0, 0), (1, 1)), constant_values=0)
+    discrim = -discrim_numerator / discrim_denominator
+
+    difficulty_midpoints = (difficulties[..., 1:] + difficulties[..., :-1]) / 2
+    difficulty_midpoints = jnp.pad(
+        difficulty_midpoints, ((0, 0), (0, 0), (1, 1)), constant_values=0
+    )
     difficulty_numerator = (
-        2*difficulty_midpoints[..., 1:] + 2*difficulty_midpoints[..., :-1]
-        + jnp.sum(b3*_X[..., :-1], axis=[0]) + jnp.sum(b2*_X[..., 1:], axis=[0])
-        + jnp.sum(b2*vals["p"][..., 1:]  * (1 - observed[... ,jnp.newaxis]), axis=0)
-        + jnp.sum(b3*vals["p"][..., :-1]  * (1 - observed[... ,jnp.newaxis]), axis=0)
+        2 * difficulty_midpoints[..., 1:]
+        + 2 * difficulty_midpoints[..., :-1]
+        + jnp.sum(b3 * _X[..., :-1], axis=[0])
+        + jnp.sum(b2 * _X[..., 1:], axis=[0])
+        + jnp.sum(b2 * vals["p"][..., 1:] * (1 - observed[..., jnp.newaxis]), axis=0)
+        + jnp.sum(b3 * vals["p"][..., :-1] * (1 - observed[..., jnp.newaxis]), axis=0)
     )
     difficulty_denominator = (
-        -2 + jnp.sum(a[..., :-1]*_X[..., :-1], axis=[0]) + jnp.sum(a[..., 1:]*_X[..., 1:], axis=[0])
-        + jnp.sum(a[..., 1:]*vals["p"][..., 1:]  * (1 - observed[... ,jnp.newaxis]), axis=0)
-        + jnp.sum(a[..., :-1]*vals["p"][..., :-1]  * (1 - observed[... ,jnp.newaxis]), axis=0) 
+        -2
+        + jnp.sum(a[..., :-1] * _X[..., :-1], axis=[0])
+        + jnp.sum(a[..., 1:] * _X[..., 1:], axis=[0])
+        + jnp.sum(
+            a[..., 1:] * vals["p"][..., 1:] * (1 - observed[..., jnp.newaxis]), axis=0
+        )
+        + jnp.sum(
+            a[..., :-1] * vals["p"][..., :-1] * (1 - observed[..., jnp.newaxis]), axis=0
+        )
     )
-    difficult =- difficulty_numerator/difficulty_denominator
-    return {"discriminations": discrim, "difficulties": difficult}
+    difficult = -difficulty_numerator / difficulty_denominator
+    return {
+        "discriminations": discrim[jnp.newaxis, :, jnp.newaxis],
+        "difficulties": difficult,
+    }
 
 
 def main():
-    abilities = np.array([0, 0.5, 0.25])[:, np.newaxis, np.newaxis]
-    difficulties = np.array([[0, 1, 2, 3], [-2, 0, 3, 4]])[np.newaxis, ...]
-    discriminations = np.array([1, 2])[np.newaxis, :, np.newaxis]
-
-    X = np.array([[2, 1], [3, 2], [0, 1]])
+    N = 500
+    K = 4
+    I = 50
+    key = PRNGKey(0)
+    abilities = normal(key, N)[:, jnp.newaxis, jnp.newaxis]
+    # abilities = jnp.array([0, 0.5, 0.25])[:, jnp.newaxis, jnp.newaxis]
+    difficulties = normal(key, (1, I, K - 1))
+    difficulties = jnp.sort(difficulties, axis=-1)
+    discriminations = jnp.abs(normal(key, I))[np.newaxis, :, np.newaxis]
+    probs = p(abilities, difficulties, discriminations)
+    # difficulties = np.array([[0, 1, 2, 3], [-2, 0, 3, 4]])[np.newaxis, ...]
+    X = categorical(key, logits=jnp.log(probs))
+    # X = np.array([[2, 1], [3, 2], [0, 1]])
 
     res = params_next(X, abilities, difficulties, discriminations)
+
     print(res)
 
 
