@@ -11,8 +11,8 @@ ddsigmoid = lambda x: sigmoid(x) * (1 - sigmoid(x)) * (1 - 2 * sigmoid(x))
 
 def p(abilities, difficulties, discriminations):
     p_cum = sigmoid(discriminations * (abilities - difficulties))
-    p_cum = jnp.pad(p_cum, ((0, 0), (0, 0), (1, 0)), constant_values=1)
-    p_cum = jnp.pad(p_cum, ((0, 0), (0, 0), (0, 1)), constant_values=0)
+    p_cum = jnp.pad(p_cum, ([[0,0]]*(len(difficulties.shape)-1) + [[1, 0]]), constant_values=1)
+    p_cum = jnp.pad(p_cum, ([[0,0]]*(len(difficulties.shape)-1) + [[0, 1]]), constant_values=0)
     return p_cum[..., :-1] - p_cum[..., 1:]
 
 
@@ -162,11 +162,31 @@ def a_b(abilities, difficulties, discriminations):
 
     return a, b2, b3, b4, vals
 
+def ldens_to_density(ldens, grid):
+    # 
+    ldens = ldens-jnp.max(ldens, axis=0, keepdims=True)
+    pi = jnp.exp(ldens)
+    Z = jnp.trapezoid(pi,grid, axis=0)
+    pi /= Z
+    mean = jnp.sum(pi * grid, axis=0)
+    return pi, mean
+
+def ability_step(X, difficulties, discriminations):
+    # Get the next expected ability for params_next
+    grid = jnp.linspace(-10, 10, 20)[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]
+    _p = p(grid, difficulties[jnp.newaxis, ...], discriminations[jnp.newaxis, ...])
+    _X = one_hot(X, difficulties.shape[-1] + 1)
+
+    lq = (_X + (jnp.sum(_X, axis=-1, keepdims=True) < 1).astype(int) * _p)*jnp.log(_p)
+    lq = jnp.sum(lq, axis=[-1, -2])
+    _, theta = ldens_to_density(lq, grid[..., 0, 0])
+    
+    return theta
+
 
 def params_next(X, abilities, difficulties, discriminations, eta):
     a, b2, b3, b4, vals = a_b(abilities, difficulties, discriminations)
     # calculate next lambda values
-    observed = (X >= 0).astype(int)
     _X = one_hot(X, vals["K"])
 
     W = _X + (jnp.sum(_X, axis=-1, keepdims=True) < 1).astype(int) * vals["p"]
@@ -223,11 +243,8 @@ def params_next(X, abilities, difficulties, discriminations, eta):
         Hlower[0, ...], Hdiag[0, ...], Hupper[0, ...], g[0, :, :, jnp.newaxis]
     )
     diff = difficulties - diff[jnp.newaxis, :, :, 0]
-    
-    return {
-        "discriminations": discrim[jnp.newaxis, :, jnp.newaxis],
-        "difficulties": diff,
-    }
+    theta = ability_step(X, difficulties, discriminations)[:, jnp.newaxis, jnp.newaxis]
+    return theta, diff, discrim
 
 
 def main():
@@ -250,9 +267,10 @@ def main():
         jnp.tile(jnp.linspace(-2, 2, num=K - 1)[:, jnp.newaxis], I)
     )[jnp.newaxis, ...]
     for _ in range(10):
-        _abilities, _difficulites, _discriminations = params_next(X, _abilities, _difficulites, _discriminations, 1e-1)
-
-    print(_discriminations)
+        _abilities, _difficulites, _discriminations = params_next(X, _abilities, _difficulites, _discriminations, 1)
+        print(_discriminations)
+        print(_difficulites)
+        pass
 
 
 if __name__ == "__main__":
