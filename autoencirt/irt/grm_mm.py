@@ -1,7 +1,13 @@
+import jax
+import numpy as np
 from jax import numpy as jnp
 from jax.lax.linalg import tridiagonal_solve
 from jax.nn import one_hot, sigmoid
 from jax.random import PRNGKey, categorical, normal
+from jax.scipy.special import xlogy
+from matplotlib import pyplot as plt
+
+jax.config.update("jax_enable_x64", True)
 
 SMALLEST_DIFFICULTY_GAP = 1e-3
 
@@ -11,9 +17,33 @@ ddsigmoid = lambda x: sigmoid(x) * (1 - sigmoid(x)) * (1 - 2 * sigmoid(x))
 
 def p(abilities, difficulties, discriminations):
     p_cum = sigmoid(discriminations * (abilities - difficulties))
-    p_cum = jnp.pad(p_cum, ([[0,0]]*(len(difficulties.shape)-1) + [[1, 0]]), constant_values=1)
-    p_cum = jnp.pad(p_cum, ([[0,0]]*(len(difficulties.shape)-1) + [[0, 1]]), constant_values=0)
+    p_cum = jnp.pad(
+        p_cum, ([[0, 0]] * (len(difficulties.shape) - 1) + [[1, 0]]), constant_values=1
+    )
+    p_cum = jnp.pad(
+        p_cum, ([[0, 0]] * (len(difficulties.shape) - 1) + [[0, 1]]), constant_values=0
+    )
     return p_cum[..., :-1] - p_cum[..., 1:]
+
+
+def rescale_params(abilities, difficulties, discriminations):
+    ability_mean = jnp.mean(abilities, axis=-3, keepdims=True)
+    ability_std = jnp.std(abilities, axis=-3, keepdims=True)
+    abilities = (abilities - ability_mean) / ability_std
+
+    difficulties = (difficulties - ability_mean) / ability_std
+    discriminations *= ability_std
+    return abilities, difficulties, discriminations
+
+def nlp_and_majorize(ability, discrimination, difficulties):
+    def _nlp(abilities, discriminations, diff):
+        return -jnp.log(p(abilities, diff, discriminations))
+    
+    def q(abilities, discriminations, diff):
+        
+        pass
+    
+    return _nlp
 
 
 #
@@ -50,6 +80,8 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
     p_cum = jnp.pad(p_cum, ((0, 0), (0, 0), (0, 1)), constant_values=0)
 
     p = p_cum[..., :-1] - p_cum[..., 1:]
+    if np.isnan(jnp.mean(p)):
+        pass
 
     # compute derivatives
 
@@ -64,11 +96,11 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
     gradients["difficulties0"] = jnp.pad(
         first["difficulties"], ((0, 0), (0, 0), (1, 0)), constant_values=0
     )
-    gradients["difficulties1"] = jnp.pad(
+    gradients["difficulties1"] = -jnp.pad(
         first["difficulties"], ((0, 0), (0, 0), (0, 1)), constant_values=0
     )
 
-    grad_log_p = {k: v / p for k, v in gradients.items()}
+    grad_log_p = {k: v / (p + 1e-10) for k, v in gradients.items()}
 
     grad2_p = {
         ("abilities", "abilities"): pad_grad_p_(second[("abilities", "difficulties")]),
@@ -111,7 +143,7 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
         ),
     }
     grad2_log_p = {
-        k: (v * p - gradients[k[0]] * gradients[k[1]]) / p**2
+        k: (v * p - gradients[k[0]] * gradients[k[1]]) / (p + 1e-8) ** 2
         for k, v in grad2_p.items()
     }
 
@@ -128,7 +160,7 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
     }
 
 
-def a_b(abilities, difficulties, discriminations):
+def a_b_c(abilities, difficulties, discriminations):
     vals = p_nik(abilities, difficulties, discriminations)
     vars = ["abilities", "discriminations", "difficulties0", "difficulties1"]
 
@@ -142,50 +174,73 @@ def a_b(abilities, difficulties, discriminations):
 
     H = [[retrive_H_term(l1, l2) for l1 in vars] for l2 in vars]
     H = jnp.transpose(jnp.array(H), (2, 3, 4, 0, 1))
-    Heigen = jnp.real(jnp.linalg.eig(H)[0])
-    a = jnp.max(Heigen, axis=-1) + 1
+    Heigen = jnp.sum(jnp.abs(H), axis=[-1,-2])
+    # Heigen = jnp.real(jnp.linalg.eig(H)[0])
+    a = Heigen*10
+    if np.isnan(jnp.mean(a)):
+        pass
 
     b4 = -vals["grad(log(p))"]["discriminations"] - a * discriminations**2
     tau0 = jnp.pad(
-        difficulties[..., :-1], ((0, 0), (0, 0), (1, 0)), constant_values=0
+        difficulties, ((0, 0), (0, 0), (1, 0)), constant_values=0
     )  # \tau_{k-1}
-
-
-    b2 = jnp.pad(
-        -vals["grad(log(p))"]["difficulties0"][..., :-1] - a[..., :-1] * tau0**2,
-        ((0, 0), (0, 0), (1, 0)),
+    tau = jnp.pad(
+        difficulties, ((0, 0), (0, 0), (0, 1)), constant_values=0
     )
-    b3 = jnp.pad(
-        -vals["grad(log(p))"]["difficulties1"][..., 1:] - a[..., 1:] * difficulties**2,
-        ((0, 0), (0, 0), (0, 1)),
+    b1 = -vals["grad(log(p))"]["abilities"] - a * abilities**2
+    b2 = -vals["grad(log(p))"]["difficulties0"] - a * tau0**2
+    b3 = (
+        -vals["grad(log(p))"]["difficulties1"]
+        - a * jnp.pad(difficulties, ((0, 0), (0, 0), (1, 0)), constant_values=0) ** 2
     )
+    
+    c = -jnp.log(vals['p']) -( a/2*(discriminations**2 + tau0**2 + tau**2) + b2*tau0+b3*tau+b4*discriminations + b1*abilities)
 
-    return a, b2, b3, b4, vals
+    if chk_nan(a):
+        pass
+    if chk_nan(b2):
+        pass
+    if chk_nan(b3):
+        pass
+    if chk_nan(b4):
+        pass
+    return a, b2, b3, b4, c, vals
+
 
 def ldens_to_density(ldens, grid):
-    # 
-    ldens = ldens-jnp.max(ldens, axis=0, keepdims=True)
-    pi = jnp.exp(ldens)
-    Z = jnp.trapezoid(pi,grid, axis=0)
+    #
+    ndens = -ldens - jnp.min(-ldens, axis=0, keepdims=True)
+    pi = jnp.exp(-ndens)
+    Z = jnp.trapezoid(pi, grid, axis=0)
     pi /= Z
     mean = jnp.sum(pi * grid, axis=0)
-    return pi, mean
+    second = jnp.sum(pi * grid**2, axis=0)
+    return pi, mean, second
+
 
 def ability_step(X, difficulties, discriminations):
     # Get the next expected ability for params_next
-    grid = jnp.linspace(-10, 10, 20)[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]
+    grid = jnp.linspace(-5, 5, 20)[:, jnp.newaxis, jnp.newaxis, jnp.newaxis]
     _p = p(grid, difficulties[jnp.newaxis, ...], discriminations[jnp.newaxis, ...])
     _X = one_hot(X, difficulties.shape[-1] + 1)
 
-    lq = (_X + (jnp.sum(_X, axis=-1, keepdims=True) < 1).astype(int) * _p)*jnp.log(_p)
+    lq = xlogy(
+        _X, _p + 1e-8
+    )
     lq = jnp.sum(lq, axis=[-1, -2])
-    _, theta = ldens_to_density(lq, grid[..., 0, 0])
-    
-    return theta
+    _, theta, var = ldens_to_density(lq, grid[..., 0, 0])
+    if np.isnan(jnp.mean(theta)):
+        pass
+
+    return theta, var
+
+
+def chk_nan(x):
+    return np.isnan(jnp.mean(x))
 
 
 def params_next(X, abilities, difficulties, discriminations, eta):
-    a, b2, b3, b4, vals = a_b(abilities, difficulties, discriminations)
+    a, b2, b3, b4, c, vals = a_b_c(abilities, difficulties, discriminations)
     # calculate next lambda values
     _X = one_hot(X, vals["K"])
 
@@ -198,6 +253,8 @@ def params_next(X, abilities, difficulties, discriminations, eta):
         axis=[0, 2],
         keepdims=True,
     )
+    if chk_nan(discrim_nu):
+        pass
     discrim_den = jnp.sum(
         W * a
         + 2 * discriminations / (1 + discriminations**2)
@@ -205,7 +262,8 @@ def params_next(X, abilities, difficulties, discriminations, eta):
         axis=[0, 2],
         keepdims=True,
     )
-    discrim = discriminations - discrim_nu / discrim_den
+    if chk_nan(discrim_den):
+        pass
     first_select = jnp.zeros_like(difficulties).at[..., :1].set(1)
     last_select = jnp.zeros_like(difficulties).at[..., -1:].set(1)
 
@@ -213,12 +271,8 @@ def params_next(X, abilities, difficulties, discriminations, eta):
     g = (
         2 * (2 - last_select) * difficulties
         + jnp.sum(
-            W[..., :-1]
-            * (
-                2 * (a[..., :-1] + a[..., 1:]) * difficulties
-                + b3[..., :-1]
-                + b2[..., 1:]
-            ),
+            W[..., :-1] * (2 * a[..., :-1] * difficulties + b3[..., :-1])
+            + W[..., 1:] * (2 * a[..., 1:] * difficulties + b2[..., 1:]),
             axis=0,
             keepdims=True,
         )
@@ -230,7 +284,9 @@ def params_next(X, abilities, difficulties, discriminations, eta):
     )
     g += (last_select - 1) * difficulties + (first_select - 1) * difficulties
     Hdiag = 2 * (
-        2 - last_select + jnp.sum(W[..., :-1] * (a[..., 1:] + a[..., :-1]), axis=0)
+        2
+        - last_select
+        + jnp.sum(W[..., :-1] * a[..., :-1] + W[..., :-1] * a[..., 1:], axis=0)
     ) + eta * (
         (1 - first_select) * jnp.pad(1 / gaps**2, ((0, 0), (0, 0), (1, 0)))
         - (1 - last_select) * jnp.pad(1 / gaps**2, ((0, 0), (0, 0), (0, 1)))
@@ -239,38 +295,74 @@ def params_next(X, abilities, difficulties, discriminations, eta):
         1 / gaps**2, ((0, 0), (0, 0), (0, 1))
     ) ** 2
     Hlower = jnp.pad(Hupper[..., :-1], ((0, 0), (0, 0), (1, 0)))
+    
     diff = tridiagonal_solve(
         Hlower[0, ...], Hdiag[0, ...], Hupper[0, ...], g[0, :, :, jnp.newaxis]
-    )
-    diff = difficulties - diff[jnp.newaxis, :, :, 0]
-    theta = ability_step(X, difficulties, discriminations)[:, jnp.newaxis, jnp.newaxis]
-    return theta, diff, discrim
+    )[jnp.newaxis, :, :, 0]
+    delta = difficulties[..., 1:] - difficulties[..., :-1]
+    diff_delta = diff[..., 1:] - diff[..., :-1]
+    t = 0.9 / jnp.max(diff_delta / delta)
+    print(t)
+    diff = difficulties - t * diff
+    theta, var = ability_step(X, difficulties, discriminations)
+    theta = theta[:, jnp.newaxis, jnp.newaxis]
+    discrim = discriminations - t * discrim_nu / discrim_den
+
+    if chk_nan(discrim):
+        pass
+    
+    
+    theta, diff, discrim = rescale_params(theta, diff, discrim)
+    lp = xlogy(_X, p(theta, diff, discrim)+ 1e-5)
+    lp = jnp.sum(lp)
+    if np.isinf(lp):
+        pass
+    return theta, diff, discrim, lp
 
 
 def main():
-    N = 1000
+    N = 10000
     K = 4
-    I = 50
+    I = 80
     key = PRNGKey(0)
     abilities = normal(key, N)[:, jnp.newaxis, jnp.newaxis]
     # abilities = jnp.array([0, 0.5, 0.25])[:, jnp.newaxis, jnp.newaxis]
-    difficulties = normal(key, (1, I, K - 1))
+    difficulties = 2 * normal(key, (1, I, K - 1))
     difficulties = jnp.sort(difficulties, axis=-1)
     discriminations = jnp.abs(normal(key, I))[jnp.newaxis, :, jnp.newaxis]
     probs = p(abilities, difficulties, discriminations)
     # difficulties = np.array([[0, 1, 2, 3], [-2, 0, 3, 4]])[np.newaxis, ...]
-    X = categorical(key, logits=jnp.log(probs))
+    X = categorical(key, logits=jnp.log(probs/(1-probs)))
     # X = np.array([[2, 1], [3, 2], [0, 1]])
     _abilities = jnp.zeros_like(abilities)
     _discriminations = jnp.ones_like(discriminations)
     _difficulites = jnp.transpose(
         jnp.tile(jnp.linspace(-2, 2, num=K - 1)[:, jnp.newaxis], I)
     )[jnp.newaxis, ...]
-    for _ in range(10):
-        _abilities, _difficulites, _discriminations = params_next(X, _abilities, _difficulites, _discriminations, 1)
-        print(_discriminations)
-        print(_difficulites)
-        pass
+    for j in range(500):
+        _abilities, _difficulites, _discriminations, _lp = params_next(
+            X, _abilities, _difficulites, _discriminations, 1 / (j + 1)
+        )
+        # print(_discriminations)
+        print(_lp)
+
+    print("ORIGINAL")
+    _ = plt.figure(figsize=(5, 5))
+    _ = plt.scatter(discriminations[0, :, 0], _discriminations[0, :, 0])
+    _ = plt.title("discriminations")
+
+    _ = plt.figure(figsize=(5, 5))
+    _ = plt.scatter(abilities[:, 0, 0], _abilities[:, 0, 0])
+    _ = plt.title("abilities")
+    
+    _ = plt.figure(figsize=(5, 5))
+    _ = plt.scatter(difficulties[0, :, 0], _difficulites[0, :, 0])
+    _ = plt.title("first difficulty")
+    _ = plt.figure(figsize=(5, 5))
+    _ = plt.scatter(difficulties[0, :, -1], _difficulites[0, :, -1])
+    _ = plt.title("last difficulty")
+
+    print(discriminations)
 
 
 if __name__ == "__main__":
