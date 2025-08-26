@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import jax.numpy as jnp
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp
 from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
@@ -53,11 +54,11 @@ class GRModel(IRTModel):
         #   w_{id} &= \frac{\lambda_{i}^{(d)}}{\sum_d \lambda_{i}^{(d)}}.
         # \end{align}
         weights = (
-            tf.math.abs(discriminations)**self.weight_exponent
-            / tf.reduce_sum(
-                tf.math.abs(discriminations)**self.weight_exponent,
-                axis=-3)[..., tf.newaxis, :, :])
-        probs = tf.reduce_sum(probs*weights, axis=-3)
+            jnp.abs(discriminations)**self.weight_exponent
+            / jnp.sum(
+                jnp.abs(discriminations)**self.weight_exponent,
+                axis=-3)[..., jnp.newaxis, :, :])
+        probs = jnp.sum(probs*weights, axis=-3)
         return probs
 
     def grm_model_prob_d(self,
@@ -89,16 +90,16 @@ class GRModel(IRTModel):
         people = tf.cast(
             data[self.person_key], tf.int32)
         choices = tf.concat(
-            [data[i][:, tf.newaxis] for i in self.item_keys],
+            [data[i][:, jnp.newaxis] for i in self.item_keys],
             axis=-1)
 
-        bad_choices = tf.less(choices, 0)
+        bad_choices = choices < 0
 
         choices = tf.where(
             bad_choices, tf.zeros_like(choices), choices)
 
         for _ in range(batch_ndims):
-            choices = choices[tf.newaxis, ...]
+            choices = choices[jnp.newaxis, ...]
 
         transpose1 = (
             [batch_ndims] + list(range(batch_ndims)) +
@@ -107,7 +108,7 @@ class GRModel(IRTModel):
         abilities = tf.gather_nd(
             tf.transpose(
                 abilities, transpose1
-            ), people[..., tf.newaxis])
+            ), people[..., jnp.newaxis])
         abilities = tf.transpose(
             abilities, transpose1
         )
@@ -120,13 +121,13 @@ class GRModel(IRTModel):
 
         log_probs = rv_responses.log_prob(choices)
         log_probs = tf.where(
-            bad_choices[tf.newaxis, ...],
+            bad_choices[jnp.newaxis, ...],
             tf.zeros_like(log_probs),
             log_probs
         )
 
-        log_probs = tf.reduce_sum(log_probs, axis=-1)
-        # log_probs = tf.reduce_sum(log_probs, axis=-1)
+        log_probs = jnp.sum(log_probs, axis=-1)
+        # log_probs = jnp.sum(log_probs, axis=-1)
 
         return {
             'log_likelihood': log_probs,
@@ -297,41 +298,41 @@ class GRModel(IRTModel):
                             tfd.Normal(
                                 loc=(
                                     tf.squeeze(
-                                        mu_ability[..., tf.newaxis, :, 0:1]
+                                        mu_ability[..., jnp.newaxis, :, 0:1]
                                         + tf.zeros(
                                             shape=(1, self.num_people,
                                                    self.dimensions if not self.include_independent else self.dimensions-1,
                                                    1),
                                             dtype=self.dtype)
                                     )
-                                )[..., tf.newaxis, tf.newaxis],
+                                )[..., jnp.newaxis, jnp.newaxis],
                                 scale=(
                                     tf.squeeze(
-                                        sigma[..., tf.newaxis, :, 0:1]
+                                        sigma[..., jnp.newaxis, :, 0:1]
                                         + tf.zeros(
                                             shape=(1, self.num_people,
                                                    self.dimensions if not self.include_independent else self.dimensions-1,
                                                    1),
                                             dtype=self.dtype)
                                     )
-                                )[..., tf.newaxis, tf.newaxis]
+                                )[..., jnp.newaxis, jnp.newaxis]
                             ),
                             reinterpreted_batch_ndims=3),
                         tfd.Independent(
                             tfd.Normal(
                                 loc=(
                                     tf.squeeze(
-                                        mu_ability[..., tf.newaxis, :, 1:2]
+                                        mu_ability[..., jnp.newaxis, :, 1:2]
                                         + tf.zeros((1, self.num_people,
                                                     self.dimensions if not self.include_independent else self.dimensions-1,
                                                     1), self.dtype)
-                                    ))[..., tf.newaxis, tf.newaxis],
+                                    ))[..., jnp.newaxis, jnp.newaxis],
                                 scale=(tf.squeeze(
-                                    sigma[..., tf.newaxis, :, 1:2]
+                                    sigma[..., jnp.newaxis, :, 1:2]
                                     + tf.zeros((1, self.num_people,
                                                 self.dimensions if not self.include_independent else self.dimensions-1,
                                                 1), self.dtype)
-                                ))[..., tf.newaxis, tf.newaxis]
+                                ))[..., jnp.newaxis, jnp.newaxis]
                             ),
                             reinterpreted_batch_ndims=3),
                     ]
@@ -397,7 +398,7 @@ class GRModel(IRTModel):
                 build_trainable_normal_dist(
                     # tf.cast(
                     #    (1.+np.abs(self.factor_loadings.T)),
-                    #    self.dtype)[tf.newaxis, ..., tf.newaxis],
+                    #    self.dtype)[jnp.newaxis, ..., jnp.newaxis],
                     discriminations0,
                     1e-4*tf.ones(
                         (1, self.dimensions, self.num_items, 1),
@@ -537,7 +538,7 @@ class GRModel(IRTModel):
         sample_log_p = sampling_rv.log_prob(trait_samples)
 
         response_probs = self.grm_model_prob_d(
-            abilities=trait_samples[..., tf.newaxis, tf.newaxis, :, :, :],
+            abilities=trait_samples[..., jnp.newaxis, jnp.newaxis, :, :, :],
             discriminations=tf.expand_dims(
                 self.surrogate_sample[
                     'discriminations'
@@ -563,15 +564,15 @@ class GRModel(IRTModel):
             reinterpreted_batch_ndims=1
         )
         lp = response_rv.log_prob(responses)
-        l_w = lp[..., tf.newaxis] - sample_log_p[:, tf.newaxis, :]
+        l_w = lp[..., jnp.newaxis] - sample_log_p[:, jnp.newaxis, :]
         # l_w = l_w - tf.reduce_max(l_w, axis=0, keepdims=True)
-        w = tf.math.exp(l_w)/tf.reduce_sum(
+        w = tf.math.exp(l_w)/jnp.sum(
             tf.math.exp(l_w), axis=0, keepdims=True)
-        mean = tf.reduce_sum(
-            w*trait_samples[:, tf.newaxis, :, 0, 0],
+        mean = jnp.sum(
+            w*trait_samples[:, jnp.newaxis, :, 0, 0],
             axis=0)
         mean2 = tf.math.reduce_sum(
-            w*trait_samples[:, tf.newaxis, :, 0, 0]**2,
+            w*trait_samples[:, jnp.newaxis, :, 0, 0]**2,
             axis=0)
         std = tf.sqrt(mean2-mean**2)
         return mean, std, w, trait_samples
@@ -581,9 +582,9 @@ class GRModel(IRTModel):
         prediction = self.predictive_distribution(data, **params)
         log_likelihood = prediction["log_likelihood"]
         weights = prediction["discriminations"]
-        weights = weights/tf.reduce_sum(weights, axis=-3, keepdims=True)
+        weights = weights/jnp.sum(weights, axis=-3, keepdims=True)
         entropy = -tf.math.xlogy(weights, weights)/params['eta']
-        entropy = tf.reduce_sum(entropy, axis=[-1, -2, -3, -4])
+        entropy = jnp.sum(entropy, axis=[-1, -2, -3, -4])
 
         finite_portion = tf.where(
             tf.math.is_finite(log_likelihood),
@@ -596,7 +597,7 @@ class GRModel(IRTModel):
             log_likelihood,
             tf.ones_like(log_likelihood) * min_val,
         )
-        return tf.cast(prior_weight, log_prior.dtype)*(log_prior - entropy) + tf.reduce_sum(log_likelihood, axis=-1)
+        return tf.cast(prior_weight, log_prior.dtype)*(log_prior - entropy) + jnp.sum(log_likelihood, axis=-1)
 
     def dumpyaml(self, item_info, scale_info):
         """

@@ -3,7 +3,6 @@
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp
 from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
-from bayesianquilts.util import batched_minimize
 from bayesianquilts.vi.advi import (build_trainable_concentration_distribution,
                                     build_trainable_InverseGamma_dist,
                                     build_trainable_normal_dist)
