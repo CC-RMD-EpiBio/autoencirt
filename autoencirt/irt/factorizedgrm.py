@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import jax
 import jax.numpy as jnp
 from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
 from bayesianquilts.util import training_loop
@@ -253,7 +254,7 @@ class FactorizedGRModel(GRModel):
         self.surrogate_distribution_generator, self.surrogate_parameter_initializer = build_factored_surrogate_posterior_generator(self.joint_prior_distribution, bijectors=self.bijectors)
         self.params = self.surrogate_parameter_initializer()
 
-
+    @jax.jit
     def transform(self, params):
         # re-assemble the discriminations
         p_shape = params["discriminations_0"].shape
@@ -269,9 +270,7 @@ class FactorizedGRModel(GRModel):
                 output_array.at[:, indices].set(update.T)[..., jnp.newaxis]
             ]
         discriminations = jnp.concat(discriminations, axis=-1)
-        _shape = discriminations.shape
-        _rank = len(_shape)
-        discriminations = jnp.transpose(discriminations, [t for t in range(1, _rank-1)] + [_rank-1, 0])
+
         discriminations = discriminations[..., jnp.newaxis, :, :, jnp.newaxis]
         params["discriminations"] = discriminations
         return params
