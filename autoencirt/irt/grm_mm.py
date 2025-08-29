@@ -40,17 +40,6 @@ def rescale_params(abilities, difficulties, discriminations):
     return abilities, difficulties, discriminations
 
 
-def nlp_and_majorize(ability, discrimination, difficulties):
-    def _nlp(abilities, discriminations, diff):
-        return -jnp.log(p(abilities, diff, discriminations))
-
-    def q(abilities, discriminations, diff):
-
-        pass
-
-    return _nlp
-
-
 #
 # N x I x K
 # Evaluate the function, and the derivatives of the function wrt theta_n,
@@ -98,8 +87,8 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
         "abilities": pad_grad_p_(first["abilities"]),
         "discriminations": pad_grad_p_(first["discriminations"]),
         "tau1": (
-            jnp.pad(first["difficulties"][..., :-1], ((0, 0), (0, 0), (1, 0)))
-            - jnp.pad(first["difficulties"][..., 1:], ((0, 0), (0, 0), (0, 1)))
+            jnp.pad(first["difficulties"], ((0, 0), (0, 0), (1, 0)))
+            - jnp.pad(first["difficulties"], ((0, 0), (0, 0), (0, 1)))
         ),
     }
 
@@ -112,11 +101,15 @@ def p_nik(abilities, difficulties, discriminations):  # dimensio
     
 
     gradients["delta"] = (
-        jnp.tril(jnp.ones((1, 1, K-2, K-2)),k=-1)*first["difficulties"][..., :-1, jnp.newaxis]
-        - jnp.tril(jnp.ones((1, 1, K-2, K-2)),k=-0)*first["difficulties"][..., 1:, jnp.newaxis]
+        jnp.tril(jnp.ones((1, 1, K, K-2)),k=-1)*first["difficulties"][..., jnp.newaxis]
+        - jnp.tril(jnp.ones((1, 1, K, K-2)),k=-0)*first["difficulties"][..., jnp.newaxis]
         )
-
-    grad_log_p = {k: v / (p + 1e-10) for k, v in gradients.items()}
+    def _div_p(v, p):
+        try:
+            return v/p
+        except ValueError:
+            return v/p[..., jnp.newaxis]
+    grad_log_p = {k: _div_p(v, p) for k, v in gradients.items()}
 
     grad2_p = {
         ("abilities", "abilities"): pad_grad_p_(second[("abilities", "difficulties")]),

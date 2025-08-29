@@ -4,9 +4,8 @@ import jax.numpy as jnp
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp
 from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
-from bayesianquilts.vi.advi import (build_trainable_concentration_distribution,
-                                    build_trainable_InverseGamma_dist,
-                                    build_trainable_normal_dist)
+from bayesianquilts.vi.advi import build_factored_surrogate_posterior_generator
+from tensorflow_probability.substrates.jax import bijectors as tfb
 from tensorflow_probability.substrates.jax import distributions as tfd
 from tensorflow_probability.substrates.jax import tf2jax as tf
 
@@ -83,8 +82,8 @@ class GRModel(IRTModel):
 
         # gather abilities and item parameters corresponding to responses
 
-        rank = len(abilities._shape_as_list())
-        batch_shape = abilities._shape_as_list()[:(rank-4)]
+        rank = len(abilities.shape)
+        batch_shape = abilities.shape[:(rank-4)]
         batch_ndims = len(batch_shape)
 
         people = tf.cast(
@@ -152,22 +151,22 @@ class GRModel(IRTModel):
             tf.distributions.JointDistributionNamed -- Joint distribution
         """
         self.bijectors = {
-            k: tfp.bijectors.Identity()
+            k: tfb.Identity()
             for
             k
             in
             ['abilities', 'mu', 'difficulties0']
         }
 
-        self.bijectors['eta'] = tfp.bijectors.Softplus()
-        self.bijectors['kappa'] = tfp.bijectors.Softplus()
+        self.bijectors['eta'] = tfb.Softplus()
+        self.bijectors['kappa'] = tfb.Softplus()
 
-        self.bijectors['discriminations'] = tfp.bijectors.Softplus()
-        self.bijectors['ddifficulties'] = tfp.bijectors.Softplus()
+        self.bijectors['discriminations'] = tfb.Softplus()
+        self.bijectors['ddifficulties'] = tfb.Softplus()
 
-        self.bijectors['eta_a'] = tfp.bijectors.Softplus()
-        self.bijectors['kappa_a'] = tfp.bijectors.Softplus()
-        self.bijectors['xi'] = tfp.bijectors.Softplus()
+        self.bijectors['eta_a'] = tfb.Softplus()
+        self.bijectors['kappa_a'] = tfb.Softplus()
+        self.bijectors['xi'] = tfb.Softplus()
 
         K = self.response_cardinality
         difficulties0 = np.sort(
@@ -283,7 +282,7 @@ class GRModel(IRTModel):
                     scale=sigma),
                 reinterpreted_batch_ndims=2
             )
-            self.bijectors['sigma'] = tfp.bijectors.Softplus()
+            self.bijectors['sigma'] = tfb.Softplus()
             grm_joint_distribution_dict['sigma'] = tfd.Independent(
                 tfd.HalfNormal(
                     scale=0.5*tf.ones((self.dimensions, self.num_groups), self.dtype)),
@@ -357,162 +356,16 @@ class GRModel(IRTModel):
                 (1, self.dimensions, self.num_items, 1),
                 dtype=self.dtype)
         )
-        surrogate_distribution_dict = {
-            'abilities': build_trainable_normal_dist(
-                tf.zeros(
-                    (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
-                    dtype=self.dtype),
-                1e-3*tf.ones(
-                    (self.num_people, self.dimensions if not self.include_independent else self.dimensions-1, 1, 1),
-                    dtype=self.dtype),
-                4,
-                name='abilities'
-            ),
-            #'xi': self.bijectors['xi'](
-            #    build_trainable_InverseGamma_dist(
-            #        0.5*tf.ones(
-            #            (1, self.dimensions, self.num_items, 1),
-            #            dtype=self.dtype),
-            #        tf.ones(
-            #            (1, self.dimensions, self.num_items, 1),
-            #            dtype=self.dtype),
-            #        4
-            #    )
-            #),
-            'ddifficulties': self.bijectors['ddifficulties'](
-                build_trainable_normal_dist(
-                    tf.cast(
-                        difficulties0[..., 1:]-difficulties0[..., :-1],
-                        dtype=self.dtype),
-                    1e-3*tf.ones(
-                        (1,
-                         self.dimensions,
-                         self.num_items,
-                         self.response_cardinality-2
-                         ), dtype=self.dtype),
-                    4,
-                    name="ddifficulties"
-                )
-            ),
-            'discriminations': self.bijectors['discriminations'](
-                build_trainable_normal_dist(
-                    # tf.cast(
-                    #    (1.+np.abs(self.factor_loadings.T)),
-                    #    self.dtype)[jnp.newaxis, ..., jnp.newaxis],
-                    discriminations0,
-                    1e-4*tf.ones(
-                        (1, self.dimensions, self.num_items, 1),
-                        dtype=self.dtype),
-                    4,
-                    name="discriminations"
-                )
-            ),
-            'mu': build_trainable_normal_dist(
-                tf.zeros(
-                    (1, self.dimensions, self.num_items, 1),
-                    dtype=self.dtype),
-                1e-3*tf.ones(
-                    (1, self.dimensions, self.num_items, 1),
-                    dtype=self.dtype),
-                4,
-                name="mu"
-            )
-        }
-        surrogate_distribution_dict = {
-            **surrogate_distribution_dict,
-            'kappa': self.bijectors['kappa'](
-                build_trainable_InverseGamma_dist(
-                    0.5*tf.ones(
-                        (1, self.dimensions, 1, 1),
-                        dtype=self.dtype),
-                    tf.ones(
-                        (1, self.dimensions, 1, 1),
-                        dtype=self.dtype),
-                    4,
-                    name='kappa'
-                )
-            ),
-            'difficulties0': build_trainable_normal_dist(
-                tf.ones(
-                    (1, self.dimensions, self.num_items, 1),
-                    dtype=self.dtype),
-                1e-3*tf.ones(
-                    (1, self.dimensions, self.num_items, 1),
-                    dtype=self.dtype),
-                4,
-                name='difficulties0'
-            )
-        }
+    
 
-        surrogate_distribution_dict["kappa_a"] = self.bijectors['kappa_a'](
-            build_trainable_InverseGamma_dist(
-                2*tf.ones(
-                    (1, self.dimensions, 1, 1),
-                    dtype=self.dtype),
-                tf.ones(
-                    (1, self.dimensions, 1, 1),
-                    dtype=self.dtype),
-                4,
-                name='kappa_a'
-            )
-        )
-
-        surrogate_distribution_dict["eta"] = self.bijectors['eta'](
-            build_trainable_normal_dist(
-                tfp.math.softplus_inverse(
-                    1e-3*tf.ones((1, 1, self.num_items, 1), dtype=self.dtype)),
-                self.eta_scale *
-                tf.ones((1, 1, self.num_items, 1), dtype=self.dtype),
-                4,
-                name='eta'
-            )
-        )
-
-        if grouping_params is not None:
-            surrogate_distribution_dict = {
-                **surrogate_distribution_dict,
-                'mu_ability': build_trainable_normal_dist(
-                    tf.zeros(
-                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
-                        dtype=self.dtype),
-                    1e-2*tf.ones(
-                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
-                        dtype=self.dtype),
-                    2,
-                    name='mu_ability'
-                ),
-                'sigma': build_trainable_InverseGamma_dist(
-                    tf.ones(
-                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
-                        dtype=self.dtype),
-                    tf.ones(
-                        (self.dimensions if not self.include_independent else self.dimensions-1, self.num_groups),
-                        dtype=self.dtype),
-                    2,
-                    name='sigma'
-                ),
-                'probs': build_trainable_concentration_distribution(
-                    tf.cast(grouping_params, self.dtype),
-                    1,
-                    name='probs'
-                )
-            }
 
         self.joint_prior_distribution = tfd.JointDistributionNamed(
             grm_joint_distribution_dict)
-        self.surrogate_distribution = tfd.JointDistributionNamed(
-            surrogate_distribution_dict)
+        
+        self.surrogate_distribution_generator, self.surrogate_parameter_initializer = build_factored_surrogate_posterior_generator(self.joint_prior_distribution)
+        self.params = self.surrogate_parameter_initializer()
 
-        if self.vi_mode == 'asvi':
-            self.surrogate_distribution = tfp.experimental.vi.build_asvi_surrogate_posterior(
-                prior=self.joint_prior_distribution
-            )
-
-        self.surrogate_vars = self.surrogate_distribution.variables
-        self.var_list = list(surrogate_distribution_dict.keys())
-        self.set_calibration_expectations()
-
-    def score(self, responses, samples=400):
+    def score(self, responses, samples=400, mm_iterations=10):
         responses = tf.cast(responses, tf.int32)
         """Compute expections by importance sampling
 

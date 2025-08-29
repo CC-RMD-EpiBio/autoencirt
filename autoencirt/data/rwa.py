@@ -71,5 +71,5 @@ def get_data(reorient=False, pandas=False):
     if pandas:
         return data, num_people
 
-    dataset = ArrayDataSource(data)
+    dataset = grain.MapDataset.source(ArrayDataSource(data))
     return dataset, num_people

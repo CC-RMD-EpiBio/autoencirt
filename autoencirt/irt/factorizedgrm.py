@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
-import numpy as np
-import tensorflow_probability.substrates.jax as tfp
+import jax.numpy as jnp
 from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
-from bayesianquilts.vi.advi import (build_trainable_concentration_distribution,
-                                    build_trainable_InverseGamma_dist,
-                                    build_trainable_normal_dist)
+from bayesianquilts.util import training_loop
+from bayesianquilts.vi.advi import build_factored_surrogate_posterior_generator
 from tensorflow_probability.python import distributions as tfd
+from tensorflow_probability.substrates.jax import bijectors as tfb
 from tensorflow_probability.substrates.jax import distributions as tfd
 from tensorflow_probability.substrates.jax import tf2jax as tf
 
@@ -25,7 +24,7 @@ class FactorizedGRModel(GRModel):
 
     response_type = "polytomous"
 
-    def __init__(self, scale_indices, *args, **kwargs):
+    def __init__(self, scale_indices, kappa_scale, *args, **kwargs):
         """Initialize model based on scale indices
 
         Args:
@@ -33,6 +32,7 @@ class FactorizedGRModel(GRModel):
         """
         self.scale_indices = scale_indices
         super(FactorizedGRModel, self).__init__(*args, **kwargs)
+        self.kappa_scale = kappa_scale
         self.dim = len(scale_indices)
         self.create_distributions()
 
@@ -44,22 +44,20 @@ class FactorizedGRModel(GRModel):
             tf.distributions.JointDistributionNamed -- Joint distribution
         """
         self.bijectors = {
-            k: tfp.bijectors.Identity() for k in ["abilities", "mu", "difficulties0"]
+            k: tfb.Identity() for k in ["abilities", "mu", "difficulties0"]
         }
 
-        self.bijectors["eta"] = tfp.bijectors.Softplus()
-        self.bijectors["kappa"] = tfp.bijectors.Softplus()
+        self.bijectors["eta"] = tfb.Softplus()
+        self.bijectors["kappa"] = tfb.Softplus()
 
-        self.bijectors["discriminations"] = tfp.bijectors.Softplus()
-        self.bijectors["ddifficulties"] = tfp.bijectors.Softplus()
+        self.bijectors["discriminations"] = tfb.Softplus()
+        self.bijectors["ddifficulties"] = tfb.Softplus()
 
-        self.bijectors["eta_a"] = tfp.bijectors.Softplus()
-        self.bijectors["kappa_a"] = tfp.bijectors.Softplus()
+        self.bijectors["eta_a"] = tfb.Softplus()
+        self.bijectors["kappa_a"] = tfb.Softplus()
 
         K = self.response_cardinality
-        difficulties0 = np.sort(
-            np.random.normal(size=(1, self.dimensions, self.num_items, K - 1)), axis=-1
-        )
+
 
         grm_joint_distribution_dict = dict(
             mu=tfd.Independent(
@@ -101,7 +99,7 @@ class FactorizedGRModel(GRModel):
         for j, indices in enumerate(self.scale_indices):
             grm_joint_distribution_dict = {
                 **grm_joint_distribution_dict,
-                **self.gen_discrim_prior(j),
+                **self.gen_discrim_prior(j, indices),
             }
         if grouping_params is not None:
             grm_joint_distribution_dict["probs"] = tfd.Independent(
@@ -115,7 +113,7 @@ class FactorizedGRModel(GRModel):
                 ),
                 reinterpreted_batch_ndims=2,
             )
-            self.bijectors["sigma"] = tfp.bijectors.Softplus()
+            self.bijectors["sigma"] = tfb.Softplus()
             grm_joint_distribution_dict["sigma"] = tfd.Independent(
                 tfd.HalfNormal(
                     scale=0.5 * tf.ones((self.dimensions, self.num_groups), self.dtype)
@@ -132,7 +130,7 @@ class FactorizedGRModel(GRModel):
                                 tfd.Normal(
                                     loc=(
                                         tf.squeeze(
-                                            mu_ability[..., tf.newaxis, :, 0:1]
+                                            mu_ability[..., jnp.newaxis, :, 0:1]
                                             + tf.zeros(
                                                 shape=(
                                                     1,
@@ -147,10 +145,10 @@ class FactorizedGRModel(GRModel):
                                                 dtype=self.dtype,
                                             )
                                         )
-                                    )[..., tf.newaxis, tf.newaxis],
+                                    )[..., jnp.newaxis, jnp.newaxis],
                                     scale=(
                                         tf.squeeze(
-                                            sigma[..., tf.newaxis, :, 0:1]
+                                            sigma[..., jnp.newaxis, :, 0:1]
                                             + tf.zeros(
                                                 shape=(
                                                     1,
@@ -165,7 +163,7 @@ class FactorizedGRModel(GRModel):
                                                 dtype=self.dtype,
                                             )
                                         )
-                                    )[..., tf.newaxis, tf.newaxis],
+                                    )[..., jnp.newaxis, jnp.newaxis],
                                 ),
                                 reinterpreted_batch_ndims=3,
                             ),
@@ -173,7 +171,7 @@ class FactorizedGRModel(GRModel):
                                 tfd.Normal(
                                     loc=(
                                         tf.squeeze(
-                                            mu_ability[..., tf.newaxis, :, 1:2]
+                                            mu_ability[..., jnp.newaxis, :, 1:2]
                                             + tf.zeros(
                                                 (
                                                     1,
@@ -188,10 +186,10 @@ class FactorizedGRModel(GRModel):
                                                 self.dtype,
                                             )
                                         )
-                                    )[..., tf.newaxis, tf.newaxis],
+                                    )[..., jnp.newaxis, jnp.newaxis],
                                     scale=(
                                         tf.squeeze(
-                                            sigma[..., tf.newaxis, :, 1:2]
+                                            sigma[..., jnp.newaxis, :, 1:2]
                                             + tf.zeros(
                                                 (
                                                     1,
@@ -206,7 +204,7 @@ class FactorizedGRModel(GRModel):
                                                 self.dtype,
                                             )
                                         )
-                                    )[..., tf.newaxis, tf.newaxis],
+                                    )[..., jnp.newaxis, jnp.newaxis],
                                 ),
                                 reinterpreted_batch_ndims=3,
                             ),
@@ -247,217 +245,38 @@ class FactorizedGRModel(GRModel):
                 ),
                 reinterpreted_batch_ndims=4,
             )
-        discriminations0 = (
-            tfp.math.softplus_inverse(tf.cast(self.discrimination_guess, self.dtype))
-            if self.discrimination_guess is not None
-            else (
-                -2.0
-                * tf.ones((1, self.dimensions, self.num_items, 1), dtype=self.dtype)
-            )
-        )
 
-        surrogate_distribution_dict = {
-            "abilities": build_trainable_normal_dist(
-                tf.zeros(
-                    (
-                        self.num_people,
-                        (
-                            self.dimensions
-                            if not self.include_independent
-                            else self.dimensions - 1
-                        ),
-                        1,
-                        1,
-                    ),
-                    dtype=self.dtype,
-                ),
-                1e-3
-                * tf.ones(
-                    (
-                        self.num_people,
-                        (
-                            self.dimensions
-                            if not self.include_independent
-                            else self.dimensions - 1
-                        ),
-                        1,
-                        1,
-                    ),
-                    dtype=self.dtype,
-                ),
-                4,
-                name="abilities",
-            ),
-            "ddifficulties": self.bijectors["ddifficulties"](
-                build_trainable_normal_dist(
-                    tf.cast(
-                        difficulties0[..., 1:] - difficulties0[..., :-1],
-                        dtype=self.dtype,
-                    ),
-                    1e-3
-                    * tf.ones(
-                        (
-                            1,
-                            self.dimensions,
-                            self.num_items,
-                            self.response_cardinality - 2,
-                        ),
-                        dtype=self.dtype,
-                    ),
-                    4,
-                    name="ddifficulties",
-                )
-            ),
-            "mu": build_trainable_normal_dist(
-                tf.zeros((1, self.dimensions, self.num_items, 1), dtype=self.dtype),
-                1e-3
-                * tf.ones((1, self.dimensions, self.num_items, 1), dtype=self.dtype),
-                4,
-                name="mu",
-            ),
-        }
-
-        for j, indices in enumerate(self.scale_indices):
-            surrogate_distribution_dict[f"discriminations_{j}"] = self.bijectors[
-                "discriminations"
-            ](
-                build_trainable_normal_dist(
-                    # tf.cast(
-                    #    (1.+np.abs(self.factor_loadings.T)),
-                    #    self.dtype)[tf.newaxis, ..., tf.newaxis],
-                    np.array(discriminations0)[..., j : (j + 1), indices, :1],
-                    5e-2 * tf.ones((1, 1, len(indices), 1), dtype=self.dtype),
-                    4,
-                    name=f"discriminations_{j}",
-                )
-            )
-            surrogate_distribution_dict[f"kappa_{j}"] = self.bijectors["kappa"](
-                build_trainable_InverseGamma_dist(
-                    0.5 * tf.ones((1, self.dimensions, 1, 1), dtype=self.dtype),
-                    tf.ones((1, self.dimensions, 1, 1), dtype=self.dtype),
-                    4,
-                    name=f"kappa_{j}",
-                )
-            )
-            surrogate_distribution_dict[f"kappa_a_{j}"] = self.bijectors["kappa_a"](
-                build_trainable_InverseGamma_dist(
-                    2 * tf.ones((1, self.dimensions, 1, 1), dtype=self.dtype),
-                    tf.ones((1, self.dimensions, 1, 1), dtype=self.dtype),
-                    4,
-                    name=f"kappa_a_{j}",
-                )
-            )
-        surrogate_distribution_dict = {
-            **surrogate_distribution_dict,
-            "difficulties0": build_trainable_normal_dist(
-                tf.ones((1, self.dimensions, self.num_items, 1), dtype=self.dtype),
-                1e-3
-                * tf.ones((1, self.dimensions, self.num_items, 1), dtype=self.dtype),
-                4,
-                name="difficulties0",
-            ),
-        }
-
-        if grouping_params is not None:
-            surrogate_distribution_dict = {
-                **surrogate_distribution_dict,
-                "mu_ability": build_trainable_normal_dist(
-                    tf.zeros(
-                        (
-                            (
-                                self.dimensions
-                                if not self.include_independent
-                                else self.dimensions - 1
-                            ),
-                            self.num_groups,
-                        ),
-                        dtype=self.dtype,
-                    ),
-                    1e-2
-                    * tf.ones(
-                        (
-                            (
-                                self.dimensions
-                                if not self.include_independent
-                                else self.dimensions - 1
-                            ),
-                            self.num_groups,
-                        ),
-                        dtype=self.dtype,
-                    ),
-                    2,
-                    name="mu_ability",
-                ),
-                "sigma": build_trainable_InverseGamma_dist(
-                    tf.ones(
-                        (
-                            (
-                                self.dimensions
-                                if not self.include_independent
-                                else self.dimensions - 1
-                            ),
-                            self.num_groups,
-                        ),
-                        dtype=self.dtype,
-                    ),
-                    tf.ones(
-                        (
-                            (
-                                self.dimensions
-                                if not self.include_independent
-                                else self.dimensions - 1
-                            ),
-                            self.num_groups,
-                        ),
-                        dtype=self.dtype,
-                    ),
-                    2,
-                    name="sigma",
-                ),
-                "probs": build_trainable_concentration_distribution(
-                    tf.cast(grouping_params, self.dtype), 1, name="probs"
-                ),
-            }
 
         self.joint_prior_distribution = tfd.JointDistributionNamed(
             grm_joint_distribution_dict
         )
-        self.surrogate_distribution = tfd.JointDistributionNamed(
-            surrogate_distribution_dict
-        )
+        self.surrogate_distribution_generator, self.surrogate_parameter_initializer = build_factored_surrogate_posterior_generator(self.joint_prior_distribution, bijectors=self.bijectors)
+        self.params = self.surrogate_parameter_initializer()
 
-        if self.vi_mode == "asvi":
-            self.surrogate_distribution = (
-                tfp.experimental.vi.build_asvi_surrogate_posterior(
-                    prior=self.joint_prior_distribution
-                )
-            )
-
-        self.surrogate_vars = self.surrogate_distribution.variables
-        self.var_list = list(surrogate_distribution_dict.keys())
-        self.set_calibration_expectations()
 
     def transform(self, params):
         # re-assemble the discriminations
-        p_shape = params["discriminations_0"].shape.as_list()
+        p_shape = params["discriminations_0"].shape
         discriminations = []
         for j, indices in enumerate(self.scale_indices):
-            scatter_ndx = [[k] for k in self.scale_indices[j]]
-            update = tf.transpose(params[f"discriminations_{j}"], [3, 0, 1, 2, 4])[
+            update = jnp.transpose(params[f"discriminations_{j}"], [3, 0, 1, 2, 4])[
                 :, :, 0, 0, 0
             ]
+            S = update.shape[1]
+            output_array = jnp.zeros((S, self.num_items), dtype=update.dtype)
+
             discriminations += [
-                tf.scatter_nd(scatter_ndx, update, shape=[self.num_items] + p_shape[:-4])[..., tf.newaxis]
+                output_array.at[:, indices].set(update.T)[..., jnp.newaxis]
             ]
-        discriminations = tf.concat(discriminations, axis=-1)
-        _shape = discriminations.shape.as_list()
+        discriminations = jnp.concat(discriminations, axis=-1)
+        _shape = discriminations.shape
         _rank = len(_shape)
-        discriminations = tf.transpose(discriminations, [t for t in range(1, _rank-1)] + [_rank-1, 0])
-        discriminations = discriminations[..., tf.newaxis, :, :, tf.newaxis]
+        discriminations = jnp.transpose(discriminations, [t for t in range(1, _rank-1)] + [_rank-1, 0])
+        discriminations = discriminations[..., jnp.newaxis, :, :, jnp.newaxis]
         params["discriminations"] = discriminations
         return params
 
-    def gen_discrim_prior(self, j):
+    def gen_discrim_prior(self, j, indices):
         out = {}
         model_string = f"""lambda kappa_{j}: tfd.Independent(
             AbsHorseshoe(scale=kappa_{j}), reinterpreted_batch_ndims=4)"""
@@ -467,7 +286,7 @@ class FactorizedGRModel(GRModel):
         )
         model_string = f"""lambda kappa_a_{j}: tfd.Independent(
             SqrtInverseGamma(
-                0.5 * tf.ones((1, self.dimensions, 1, 1), dtype=self.dtype),
+                0.5 * tf.ones((1, 1, {len(indices)}, 1), dtype=self.dtype),
                 1.0 / kappa_a_{j}),
             reinterpreted_batch_ndims=4)"""
         out[f"kappa_{j}"] = eval(
@@ -476,8 +295,8 @@ class FactorizedGRModel(GRModel):
         )
         out[f"kappa_a_{j}"] = tfd.Independent(
             tfd.InverseGamma(
-                0.5 * tf.ones((1, self.dimensions, 1, 1), dtype=self.dtype),
-                tf.ones((1, self.dimensions, 1, 1), dtype=self.dtype)
+                0.5 * tf.ones((1, 1, len(indices), 1), dtype=self.dtype),
+                tf.ones((1, 1, len(indices), 1), dtype=self.dtype)
                 / self.kappa_scale**2,
             ),
             reinterpreted_batch_ndims=4,
@@ -489,7 +308,7 @@ class FactorizedGRModel(GRModel):
         return super(FactorizedGRModel, self).predictive_distribution(data, **params)
 
     def fit_projection(
-        self, other, batched_data_factory, num_steps, samples=32, **kwargs
+        self, other, batched_data_factory, steps_per_epoch, num_epochs, samples=32, **kwargs
     ):
         def objective(data):
             this_prediction = self.predictive_distribution(
@@ -501,10 +320,12 @@ class FactorizedGRModel(GRModel):
             delta = other_prediction.kl_divergence(this_prediction)
             return tf.reduce_mean(delta)
 
-        return batched_minimize(
+        return training_loop(
+            self.params,
             objective,
-            batched_data_factory=batched_data_factory,
-            num_steps=num_steps,
+            data_iterator=batched_data_factory,
+            steps_per_epoch=steps_per_epoch,
+            num_epochs=num_epochs,
             trainable_variables=self.surrogate_distribution.variables,
             **kwargs,
         )
