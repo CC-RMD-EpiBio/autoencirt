@@ -52,7 +52,7 @@ class FactorizedGRModel(GRModel):
         self.bijectors["kappa"] = tfb.Softplus()
 
         self.bijectors["discriminations"] = tfb.Softplus()
-        self.bijectors["ddifficulties"] = tfb.Softplus()
+        self.bijectors["ddifficulties"] = tfb.Softplus() #make_shifted_softplus(1e-3)
 
         self.bijectors["eta_a"] = tfb.Softplus()
         self.bijectors["kappa_a"] = tfb.Softplus()
@@ -98,6 +98,7 @@ class FactorizedGRModel(GRModel):
         )
 
         for j, indices in enumerate(self.scale_indices):
+            self.bijectors[f'discriminations_{j}'] = tfb.Softplus()
             grm_joint_distribution_dict = {
                 **grm_joint_distribution_dict,
                 **self.gen_discrim_prior(j, indices),
@@ -251,8 +252,9 @@ class FactorizedGRModel(GRModel):
         self.joint_prior_distribution = tfd.JointDistributionNamed(
             grm_joint_distribution_dict
         )
-        self.surrogate_distribution_generator, self.surrogate_parameter_initializer = build_factored_surrogate_posterior_generator(self.joint_prior_distribution, bijectors=self.bijectors)
+        self.surrogate_distribution_generator, self.surrogate_parameter_initializer = build_factored_surrogate_posterior_generator(self.joint_prior_distribution, bijectors=self.bijectors, dtype=self.dtype)
         self.params = self.surrogate_parameter_initializer()
+        return
 
     @jax.jit
     def transform(self, params):
@@ -270,9 +272,12 @@ class FactorizedGRModel(GRModel):
                 output_array.at[:, indices].set(update.T)[..., jnp.newaxis]
             ]
         discriminations = jnp.concat(discriminations, axis=-1)
-
+        _shape = discriminations.shape
+        _rank = len(_shape)
+        discriminations = jnp.transpose(discriminations, [t for t in range(_rank-2)] + [_rank-1, _rank-2])
         discriminations = discriminations[..., jnp.newaxis, :, :, jnp.newaxis]
         params["discriminations"] = discriminations
+        
         return params
 
     def gen_discrim_prior(self, j, indices):
@@ -305,7 +310,25 @@ class FactorizedGRModel(GRModel):
     def predictive_distribution(self, data, **params):
         params = self.transform(params)
         return super(FactorizedGRModel, self).predictive_distribution(data, **params)
+    def unormalized_log_prob(self, data, prior_weight=1., **params):
+        log_prior = self.joint_prior_distribution.log_prob(params)
+        prediction = self.predictive_distribution(data, **params)
+        log_likelihood = prediction["log_likelihood"]
 
+        finite_portion = jnp.where(
+            jnp.isfinite(log_likelihood),
+            log_likelihood,
+            jnp.zeros_like(log_likelihood),
+        )
+        min_val = jnp.min(finite_portion) - 1.0
+        log_likelihood = jnp.where(
+            jnp.isfinite(log_likelihood),
+            log_likelihood,
+            jnp.ones_like(log_likelihood) * min_val,
+        )
+        return prior_weight * log_prior + jnp.sum(
+            log_likelihood, axis=-1
+        )
     def fit_projection(
         self, other, batched_data_factory, steps_per_epoch, num_epochs, samples=32, **kwargs
     ):

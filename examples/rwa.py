@@ -1,10 +1,14 @@
 
 
+import jax
 import jax.numpy as jnp
 from factor_analyzer import FactorAnalyzer
 
 from autoencirt.data.rwa import get_data
 from autoencirt.irt import FactorizedGRModel
+
+jax.config.update("jax_enable_x64", True)
+
 
 dim = 2
 
@@ -33,11 +37,14 @@ def main():
         discrimination_guess=0.5*jnp.abs(loadings).T.astype(jnp.float64)[
             jnp.newaxis, :, :, jnp.newaxis
         ],
+        dtype=jnp.float64
     )
-    batched = dataset.batch(20)
+    batch_size = 500
+    batched = dataset.batch(batch_size)
+    batch = next(iter(batched))
     p = fgrm.sample(20)
-    ll = fgrm.log_likelihood(batched, **p)
-    print(ll)
+    p_ = fgrm.predictive_distribution(batch, **p)
+    print(p_)
 
 if __name__ == "__main__":
     main()
