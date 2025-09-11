@@ -21,7 +21,7 @@ aiofiles==24.1.0
     # via orbax-checkpoint
 annotated-types==0.7.0
     # via pydantic
-array-record==0.8.1
+array-record==0.7.2
     # via grain
 arviz==0.22.0
     # via -r requirements.in
@@ -39,7 +39,7 @@ certifi==2025.8.3
     #   requests
 charset-normalizer==3.4.3
     # via requests
-chex==0.1.91
+chex==0.1.90
     # via optax
 click==8.2.1
     # via typer
@@ -92,7 +92,7 @@ filelock==3.19.1
     #   transformers
 filetype==1.2.0
     # via docling
-flax==0.11.2
+flax==0.10.6
     # via -r requirements.in
 fonttools==4.59.2
     # via matplotlib
@@ -103,7 +103,7 @@ fsspec==2025.9.0
     #   torch
 gast==0.6.0
     # via tensorflow-probability
-grain==0.2.12
+grain==0.2.11
     # via -r requirements.in
 h5netcdf==1.6.4
     # via arviz
@@ -126,14 +126,14 @@ imageio==2.37.0
     # via scikit-image
 importlib-resources==6.5.2
     # via etils
-jax==0.7.1
+jax==0.5.3
     # via
     #   -r requirements.in
     #   chex
     #   flax
     #   optax
     #   orbax-checkpoint
-jaxlib==0.7.1
+jaxlib==0.5.3
     # via
     #   chex
     #   jax
@@ -261,7 +261,7 @@ packaging==25.0
     #   scikit-image
     #   transformers
     #   xarray
-pandas==2.3.2
+pandas==2.2.2
     # via
     #   -r requirements.in
     #   arviz

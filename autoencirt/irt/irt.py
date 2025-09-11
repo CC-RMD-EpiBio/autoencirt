@@ -1,6 +1,6 @@
 
 from bayesianquilts.model import BayesianModel
-from bayesianquilts.nn.dense import Dense
+from bayesianquilts.predictors.nn.dense import Dense
 from tensorflow_probability.substrates.jax import distributions as tfd
 from tensorflow_probability.substrates.jax import tf2jax as tf
 
