@@ -24,7 +24,7 @@ class IRTModel(BayesianModel):
             weight_exponent=1.0,
             response_cardinality=5,
             discrimination_guess=None,
-            include_independent=True,
+            include_independent=False,
             vi_mode='advi',
             dtype=tf.float64):
         super(IRTModel, self).__init__(

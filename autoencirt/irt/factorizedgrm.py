@@ -59,48 +59,14 @@ class FactorizedGRModel(GRModel):
         K = self.response_cardinality
 
 
-        grm_joint_distribution_dict = dict(
-            mu=tfd.Independent(
-                tfd.Normal(
-                    loc=tf.zeros(
-                        (1, self.dimensions, self.num_items, 1), dtype=self.dtype
-                    ),
-                    scale=tf.ones(
-                        (1, self.dimensions, self.num_items, 1), dtype=self.dtype
-                    ),
-                ),
-                reinterpreted_batch_ndims=4,
-            ),  # mu
-            difficulties0=lambda mu: tfd.Independent(
-                tfd.Normal(
-                    loc=mu,
-                    scale=tf.ones(
-                        (1, self.dimensions, self.num_items, 1), dtype=self.dtype
-                    ),
-                ),
-                reinterpreted_batch_ndims=4,
-            ),  # difficulties0
-            ddifficulties=tfd.Independent(
-                tfd.HalfNormal(
-                    scale=tf.ones(
-                        (
-                            1,
-                            self.dimensions,
-                            self.num_items,
-                            self.response_cardinality - 2,
-                        ),
-                        dtype=self.dtype,
-                    )
-                ),
-                reinterpreted_batch_ndims=4,
-            ),
-        )
+        grm_joint_distribution_dict = {}
 
         for j, indices in enumerate(self.scale_indices):
             self.bijectors[f'discriminations_{j}'] = tfb.Softplus()
             grm_joint_distribution_dict = {
                 **grm_joint_distribution_dict,
                 **self.gen_discrim_prior(j, indices),
+                **self.gen_difficulty_prior(j, indices),
             }
         if grouping_params is not None:
             grm_joint_distribution_dict["probs"] = tfd.Independent(
@@ -258,24 +224,52 @@ class FactorizedGRModel(GRModel):
     #@jax.jit
     def transform(self, params):
         # re-assemble the discriminations
-        p_shape = params["discriminations_0"].shape
         discriminations = []
+        d0 = []
+        dd = []
         for j, indices in enumerate(self.scale_indices):
             update = jnp.transpose(params[f"discriminations_{j}"], [3, 0, 1, 2, 4])[
                 :, :, 0, 0, 0
             ]
+            update_d0 = jnp.transpose(params[f"difficulties0_{j}"], [3, 0, 1, 2, 4])[
+                :, :, 0, 0, 0
+            ]
+            update_dd = jnp.transpose(params[f"ddifficulties_{j}"], [4, 3, 0, 1, 2])[
+                :, :, :, 0, 0
+            ]
             S = update.shape[1]
             output_array = jnp.zeros((S, self.num_items), dtype=update.dtype)
+            output_array_d0 = jnp.zeros((S, self.num_items), dtype=update.dtype)
+            output_array_dd = jnp.zeros((S, self.num_items, self.response_cardinality -2), dtype=update.dtype)
 
             discriminations += [
                 output_array.at[:, indices].set(update.T)[..., jnp.newaxis]
             ]
+            d0 += [
+                output_array_d0.at[:, indices].set(update_d0.T)[..., jnp.newaxis]
+            ]
+            dd += [
+                output_array_dd.at[:, indices].set(update_dd.T)[..., jnp.newaxis]
+            ]
         discriminations = jnp.concat(discriminations, axis=-1)
+        d0 = jnp.concat(d0, axis=-1)
+        dd = jnp.concat(dd, axis=-1)
         _shape = discriminations.shape
         _rank = len(_shape)
+        dd = jnp.transpose(dd, [t for t in range(_rank-2)] + [_rank, _rank-2, _rank-1])
         discriminations = jnp.transpose(discriminations, [t for t in range(_rank-2)] + [_rank-1, _rank-2])
         discriminations = discriminations[..., jnp.newaxis, :, :, jnp.newaxis]
+
+        d0 = jnp.transpose(d0, [t for t in range(_rank-2)] + [_rank-1, _rank-2])
+        d0 = d0[..., jnp.newaxis, :, :, jnp.newaxis]
+        dd = dd[..., jnp.newaxis, :, :, :]
         params["discriminations"] = discriminations
+        params["difficulties0"] = d0
+        params["ddifficulties"] = dd
+        diff = jnp.concat([d0, dd], axis=-1)
+        diff = jnp.cumsum(diff, axis=-1)
+        params["difficulties"] = diff
+        # assemble the difficulties
         
         return params
 
@@ -304,6 +298,33 @@ class FactorizedGRModel(GRModel):
             ),
             reinterpreted_batch_ndims=4,
         )
+        return out
+    def gen_difficulty_prior(self, j, indices):
+        out = {}
+        out[f"difficulties0_{j}"] = tfd.Independent(
+                tfd.Normal(
+                    loc=3*tf.ones(
+                        (1, 1, len(indices), 1), dtype=self.dtype
+                    ), # mu[..., indices, :],
+                    scale=tf.ones(
+                        (1, 1, len(indices), 1), dtype=self.dtype
+                    ),
+                ),
+                reinterpreted_batch_ndims=4,
+            )
+        out[f"ddifficulties_{j}"] = tfd.Independent(
+                tfd.HalfNormal(
+                    scale=tf.ones(
+                        (
+                            1,
+                            self.dimensions,
+                            len(indices),
+                            self.response_cardinality - 2,
+                        ), dtype=self.dtype
+                    ),
+                ),
+                reinterpreted_batch_ndims=4,
+            )
         return out
 
     def predictive_distribution(self, data, **params):
