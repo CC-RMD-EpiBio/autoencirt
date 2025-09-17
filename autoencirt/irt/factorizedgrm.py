@@ -317,7 +317,7 @@ class FactorizedGRModel(GRModel):
                     scale=tf.ones(
                         (
                             1,
-                            self.dimensions,
+                            1,
                             len(indices),
                             self.response_cardinality - 2,
                         ), dtype=self.dtype
