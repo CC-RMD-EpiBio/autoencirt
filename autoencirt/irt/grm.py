@@ -455,8 +455,8 @@ class GRModel(IRTModel):
         """
         sampling_rv = tfd.Independent(
             tfd.Normal(
-                loc=jnp.reduce_mean(self.calibrated_expectations["abilities"], axis=0),
-                scale=jnp.math.reduce_std(
+                loc=jnp.mean(self.calibrated_expectations["abilities"], axis=0),
+                scale=jnp.std(
                     self.calibrated_expectations["abilities"], axis=0
                 ),
             ),
@@ -473,7 +473,7 @@ class GRModel(IRTModel):
             ddifficulties=jnp.expand_dims(self.surrogate_sample["ddifficulties"], 0),
         )
 
-        response_probs = jnp.reduce_mean(response_probs, axis=-4)
+        response_probs = jnp.mean(response_probs, axis=-4)
 
         response_rv = tfd.Independent(
             tfd.Categorical(probs=response_probs), reinterpreted_batch_ndims=1
@@ -483,7 +483,7 @@ class GRModel(IRTModel):
         # l_w = l_w - jnp.reduce_max(l_w, axis=0, keepdims=True)
         w = jnp.math.exp(l_w) / jnp.sum(jnp.math.exp(l_w), axis=0, keepdims=True)
         mean = jnp.sum(w * trait_samples[:, jnp.newaxis, :, 0, 0], axis=0)
-        mean2 = jnp.math.reduce_sum(
+        mean2 = jnp.sum(
             w * trait_samples[:, jnp.newaxis, :, 0, 0] ** 2, axis=0
         )
         std = jnp.sqrt(mean2 - mean**2)
@@ -503,7 +503,7 @@ class GRModel(IRTModel):
             log_likelihood,
             jnp.zeros_like(log_likelihood),
         )
-        min_val = jnp.reduce_min(finite_portion) - 1.0
+        min_val = jnp.min(finite_portion) - 1.0
         log_likelihood = jnp.where(
             jnp.isfinite(log_likelihood),
             log_likelihood,

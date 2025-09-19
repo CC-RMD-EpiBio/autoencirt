@@ -47,14 +47,13 @@ class FactorizedGRModel(GRModel):
             k: tfb.Identity() for k in ["abilities", "mu", "difficulties0"]
         }
 
-        self.bijectors["eta"] = tfb.Softplus()
+
         self.bijectors["kappa"] = tfb.Softplus()
+        self.bijectors["kappa_a"] = tfb.Softplus()
 
         self.bijectors["discriminations"] = tfb.Softplus()
         self.bijectors["ddifficulties"] = tfb.Softplus() #make_shifted_softplus(1e-3)
 
-        self.bijectors["eta_a"] = tfb.Softplus()
-        self.bijectors["kappa_a"] = tfb.Softplus()
 
         K = self.response_cardinality
 
@@ -330,25 +329,7 @@ class FactorizedGRModel(GRModel):
     def predictive_distribution(self, data, **params):
         params = self.transform(params)
         return super(FactorizedGRModel, self).predictive_distribution(data, **params)
-    def unormalized_log_prob(self, data, prior_weight=1., **params):
-        log_prior = self.joint_prior_distribution.log_prob(params)
-        prediction = self.predictive_distribution(data, **params)
-        log_likelihood = prediction["log_likelihood"]
 
-        finite_portion = jnp.where(
-            jnp.isfinite(log_likelihood),
-            log_likelihood,
-            jnp.zeros_like(log_likelihood),
-        )
-        min_val = jnp.min(finite_portion) - 1.0
-        log_likelihood = jnp.where(
-            jnp.isfinite(log_likelihood),
-            log_likelihood,
-            jnp.ones_like(log_likelihood) * min_val,
-        )
-        return prior_weight * log_prior + jnp.sum(
-            log_likelihood, axis=-1
-        )
     def fit_projection(
         self, other, batched_data_factory, steps_per_epoch, num_epochs, samples=32, **kwargs
     ):
@@ -370,4 +351,25 @@ class FactorizedGRModel(GRModel):
             num_epochs=num_epochs,
             trainable_variables=self.surrogate_distribution.variables,
             **kwargs,
+        )
+        
+    def unormalized_log_prob(self, data, prior_weight=1., **params):
+        log_prior = self.joint_prior_distribution.log_prob(params)
+        prediction = self.predictive_distribution(data, **params)
+        log_likelihood = prediction["log_likelihood"]
+
+        finite_portion = jnp.where(
+            jnp.isfinite(log_likelihood),
+            log_likelihood,
+            jnp.zeros_like(log_likelihood),
+        )
+        
+        min_val = jnp.min(finite_portion) - 5.0
+        log_likelihood = jnp.where(
+            jnp.isfinite(log_likelihood),
+            log_likelihood,
+            jnp.ones_like(log_likelihood) * min_val,
+        )
+        return prior_weight.astype(log_prior.dtype) * (log_prior) + jnp.sum(
+            log_likelihood, axis=-1
         )
