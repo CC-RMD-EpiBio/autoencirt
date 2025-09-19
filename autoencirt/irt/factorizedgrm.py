@@ -370,6 +370,6 @@ class FactorizedGRModel(GRModel):
             log_likelihood,
             jnp.ones_like(log_likelihood) * min_val,
         )
-        return prior_weight.astype(log_prior.dtype) * (log_prior) + jnp.sum(
+        return prior_weight * log_prior + jnp.sum(
             log_likelihood, axis=-1
         )
