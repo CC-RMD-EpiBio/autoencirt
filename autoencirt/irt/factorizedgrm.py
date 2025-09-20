@@ -320,8 +320,11 @@ class FactorizedGRModel(IRTModel):
         )
 
     def unormalized_log_prob(self, data, prior_weight=1.0, **params):
+        _params = params.copy()
+        if 'difficulties' not in _params:
+            _params = self.transform(_params)
         log_prior = self.joint_prior_distribution.log_prob(params)
-        prediction = self.predictive_distribution(data, **params)
+        prediction = self.predictive_distribution(data, **_params)
         log_likelihood = prediction["log_likelihood"]
 
         finite_portion = jnp.where(
