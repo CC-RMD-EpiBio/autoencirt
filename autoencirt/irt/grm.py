@@ -2,7 +2,6 @@
 
 import jax.numpy as jnp
 import numpy as np
-import tensorflow_probability.substrates.jax as tfp
 from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
 from bayesianquilts.vi.advi import build_factored_surrogate_posterior_generator
 from jax.scipy.special import xlogy
@@ -117,12 +116,13 @@ class GRModel(IRTModel):
         abilities = abilities[:, people, ...]
 
         response_probs = self.grm_model_prob(abilities, discriminations, difficulties)
+        imputed_lp =jnp.sum(xlogy(response_probs, response_probs), axis=-1)
 
         rv_responses = tfd.Categorical(probs=response_probs)
 
         log_probs = rv_responses.log_prob(choices)
         log_probs = jnp.where(
-            bad_choices[jnp.newaxis, ...], jnp.zeros_like(log_probs), log_probs
+            bad_choices[jnp.newaxis, ...], imputed_lp, log_probs
         )
 
         log_probs = jnp.sum(log_probs, axis=-1)
@@ -425,14 +425,7 @@ class GRModel(IRTModel):
                 ),
                 reinterpreted_batch_ndims=4,
             )
-        discriminations0 = (
-            tfp.math.softplus_inverse(jnp.cast(self.discrimination_guess, self.dtype))
-            if self.discrimination_guess is not None
-            else (
-                -2.0
-                * jnp.ones((1, self.dimensions, self.num_items, 1), dtype=self.dtype)
-            )
-        )
+
 
         self.joint_prior_distribution = tfd.JointDistributionNamed(
             grm_joint_distribution_dict
@@ -488,7 +481,29 @@ class GRModel(IRTModel):
         )
         std = jnp.sqrt(mean2 - mean**2)
         return mean, std, w, trait_samples
-
+    
+    def fit_dim(self, *args, dim: int,  **kwargs):
+        if dim >= self.dimensions:
+            raise ValueError("Dimension to fit must be less than model dimensions")
+        # Only optimize parameters for the selected dimension `dim`
+        optimizing_keys = [
+            k
+            for k in self.params.keys()
+            if (
+            not any(
+                k.startswith(prefix)
+                and not k.startswith(f"{prefix}{dim}")
+                for prefix in [
+                "discriminations_",
+                "ddifficulties_",
+                "difficulties0_",
+                "kappa_",
+                "kappa_a_",
+                ]
+            )
+            )
+        ]
+        return self.fit(*args, **kwargs, optimize_keys=optimizing_keys)
     def unormalized_log_prob(self, data, prior_weight=1., **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
         prediction = self.predictive_distribution(data, **params)
