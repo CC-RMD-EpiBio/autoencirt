@@ -60,6 +60,7 @@ class FactorizedGRModel(IRTModel):
 
         for j, indices in enumerate(self.scale_indices):
             self.bijectors[f"discriminations_{j}"] = tfb.Softplus()
+            self.bijectors[f"ddifficulties_{j}"] = tfb.Softplus()
             grm_joint_distribution_dict = {
                 **grm_joint_distribution_dict,
                 **self.gen_discrim_prior(j, indices),
@@ -88,22 +89,22 @@ class FactorizedGRModel(IRTModel):
         return
 
     def grm_model_prob(self, abilities, discriminations, difficulties):
-        offsets = difficulties - abilities  # N x D x I x K-1
-        scaled = offsets * discriminations
-        logits = 1.0 / (1 + jnp.exp(scaled))
-        logits = jnp.pad(
-            logits,
-            ([(0, 0)] * (len(logits.shape) - 1) + [(1, 0)]),
+        logits = difficulties - abilities  # N x D x I x K-1
+        logits = logits * discriminations
+        probs = 1.0 / (1 + jnp.exp(logits))
+        probs = jnp.pad(
+            probs,
+            ([(0, 0)] * (len(probs.shape) - 1) + [(1, 0)]),
             mode="constant",
             constant_values=1,
         )
-        logits = jnp.pad(
-            logits,
-            ([(0, 0)] * (len(logits.shape) - 1) + [(0, 1)]),
+        probs = jnp.pad(
+            probs,
+            ([(0, 0)] * (len(probs.shape) - 1) + [(0, 1)]),
             mode="constant",
             constant_values=0,
         )
-        probs = logits[..., :-1] - logits[..., 1:]
+        probs = probs[..., :-1] - probs[..., 1:]
         return probs
 
     def grm_model_prob_d(
@@ -192,14 +193,14 @@ class FactorizedGRModel(IRTModel):
     def gen_discrim_prior(self, j, indices):
         out = {}
         model_string = f"""lambda kappa_{j}: tfd.Independent(
-            AbsHorseshoe(scale=kappa_{j}), reinterpreted_batch_ndims=4)"""
+            AbsHorseshoe(scale=kappa_{j}*tf.ones((1, 1, {len(indices)}, 1))), reinterpreted_batch_ndims=4)"""
         out[f"discriminations_{j}"] = eval(
             model_string,
             {"self": self, "tfd": tfd, "tf": tf, "AbsHorseshoe": AbsHorseshoe},
         )
         model_string = f"""lambda kappa_a_{j}: tfd.Independent(
             SqrtInverseGamma(
-                0.5 * tf.ones((1, 1, {len(indices)}, 1), dtype=self.dtype),
+                0.5 * tf.ones((1, 1, 1, 1), dtype=self.dtype),
                 1.0 / kappa_a_{j}),
             reinterpreted_batch_ndims=4)"""
         out[f"kappa_{j}"] = eval(
@@ -208,8 +209,8 @@ class FactorizedGRModel(IRTModel):
         )
         out[f"kappa_a_{j}"] = tfd.Independent(
             tfd.InverseGamma(
-                0.5 * tf.ones((1, 1, len(indices), 1), dtype=self.dtype),
-                tf.ones((1, 1, len(indices), 1), dtype=self.dtype)
+                0.5 * tf.ones((1, 1, 1, 1), dtype=self.dtype),
+                tf.ones((1, 1, 1, 1), dtype=self.dtype)
                 / self.kappa_scale**2,
             ),
             reinterpreted_batch_ndims=4,
