@@ -264,7 +264,7 @@ class FactorizedGRModel(IRTModel):
         people = data[self.person_key].astype(jnp.int32)
         choices = jnp.concat([data[i][:, jnp.newaxis] for i in self.item_keys], axis=-1)
 
-        bad_choices = choices < 0
+        bad_choices = (choices < 0) | (choices >= self.response_cardinality) | jnp.isnan(choices)
 
         for _ in range(batch_ndims):
             choices = choices[jnp.newaxis, ...]
@@ -272,10 +272,10 @@ class FactorizedGRModel(IRTModel):
         abilities = abilities[..., people, :, :, :]
 
         response_probs = self.grm_model_prob(abilities, discriminations, difficulties)
-        response_probs *= jnp.heaviside(
-            discriminations, jnp.zeros_like(discriminations)
-        )
-        response_probs = jnp.sum(response_probs, axis=-3)
+        discrimination_weights = jnp.abs(discriminations) / jnp.sum(
+            jnp.abs(discriminations), axis=-3, keepdims=True)
+
+        response_probs = jnp.sum(response_probs*discrimination_weights, axis=-3)
         imputed_lp = jnp.sum(xlogy(response_probs, response_probs), axis=-1)
 
         rv_responses = tfd.Categorical(probs=response_probs)
