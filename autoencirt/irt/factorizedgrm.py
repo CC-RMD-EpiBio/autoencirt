@@ -193,7 +193,7 @@ class FactorizedGRModel(IRTModel):
     def gen_discrim_prior(self, j, indices):
         out = {}
         model_string = f"""lambda kappa_{j}: tfd.Independent(
-            AbsHorseshoe(scale=kappa_{j}*tf.ones((1, 1, {len(indices)}, 1))), reinterpreted_batch_ndims=4)"""
+            tfd.HalfNormal(scale=kappa_{j}*tf.ones((1, 1, {len(indices)}, 1))), reinterpreted_batch_ndims=4)"""
         out[f"discriminations_{j}"] = eval(
             model_string,
             {"self": self, "tfd": tfd, "tf": tf, "AbsHorseshoe": AbsHorseshoe},
