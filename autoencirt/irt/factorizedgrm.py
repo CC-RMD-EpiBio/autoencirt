@@ -65,15 +65,10 @@ class FactorizedGRModel(IRTModel):
                 **grm_joint_distribution_dict,
                 **self.gen_discrim_prior(j, indices),
                 **self.gen_difficulty_prior(j, indices),
+                **self.gen_ability_prior(j),
             }
 
-        grm_joint_distribution_dict["abilities"] = tfd.Independent(
-            tfd.Normal(
-                loc=jnp.zeros((self.num_people, self.dimensions, 1, 1), self.dtype),
-                scale=jnp.ones((self.num_people, self.dimensions, 1, 1), self.dtype),
-            ),
-            reinterpreted_batch_ndims=4,
-        )
+
 
         self.joint_prior_distribution = tfd.JointDistributionNamed(
             grm_joint_distribution_dict
@@ -130,6 +125,7 @@ class FactorizedGRModel(IRTModel):
                         "difficulties0_",
                         "kappa_",
                         "kappa_a_",
+                        "abilities_",
                     ]
                 )
             )
@@ -165,6 +161,7 @@ class FactorizedGRModel(IRTModel):
             d0 += [output_array_d0.at[:, indices].set(update_d0.T)[..., jnp.newaxis]]
             dd += [output_array_dd.at[:, indices].set(update_dd.T)[..., jnp.newaxis]]
         discriminations = jnp.concat(discriminations, axis=-1)
+        abilities = jnp.concat([params[f"abilities_{j}"] for j in range(self.dimensions)], axis=-3)
         d0 = jnp.concat(d0, axis=-1)
         dd = jnp.concat(dd, axis=-1)
         _shape = discriminations.shape
@@ -186,6 +183,7 @@ class FactorizedGRModel(IRTModel):
         diff = jnp.concat([d0, dd], axis=-1)
         diff = jnp.cumsum(diff, axis=-1)
         params["difficulties"] = diff
+        params["abilities"] = abilities
         # assemble the difficulties
 
         return params
@@ -216,6 +214,18 @@ class FactorizedGRModel(IRTModel):
             reinterpreted_batch_ndims=4,
         )
         return out
+    
+    def gen_ability_prior(self, j):
+        out = {}
+        out[f"abilities_{j}"] = tfd.Independent(
+            tfd.Normal(
+                loc=jnp.zeros((self.num_people, 1, 1, 1), self.dtype),
+                scale=5*jnp.ones((self.num_people, 1, 1, 1), self.dtype),
+            ),
+            reinterpreted_batch_ndims=4,
+        )
+        return out
+        
 
     def gen_difficulty_prior(self, j, indices):
         out = {}

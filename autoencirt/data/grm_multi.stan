@@ -7,10 +7,13 @@ data {
   int<lower=1> N_item;                   // number of items
   int<lower=1> N_scales;                 // number of latent scales
   int<lower=1> N_responses;              // rows in long data
-  int<lower=2, upper=6> K;               // number of categories
+  int<lower=1> N_missing;                // number of missing responses
+  int<lower=2, upper=5> K;               // number of categories
   array[N_responses] int responses;   // 0 = missing, 1..K observed
   array[N_responses] int<lower=1, upper=N_person> person;
   array[N_responses] int<lower=1, upper=N_item> item;
+  array[N_missing] int<lower=1, upper=N_person> person_missing;
+  array[N_missing] int<lower=1, upper=N_item> item_missing;
   array[N_item]      int<lower=1, upper=N_scales> scale; // scale membership per item
 }
 
@@ -53,27 +56,29 @@ model {
         lambda[i] * theta[p, s],
         lambda[i] * tau[i]
       );
-    } else {
-  int i = item[r];
-  int p = person[r];
-  int s = scale[i];
-  vector[K] logp;
-  vector[K] pcat;
-
-  // log p(Y = k) for all categories
-  for (k in 1:K) {
-    logp[k] = ordered_logistic_lpmf(
-      k |
-      lambda[i] * theta[p, s],
-      lambda[i] * tau[i]
-    );
+    } 
   }
-  pcat = softmax(logp); // normalize to probs
+  /*
+  for (r in 1:N_missing) {
+    int i = item_missing[r];
+    int p = person_missing[r];
+    int s = scale[i];
+    vector[K] logp;
+    vector[K] pcat;
 
-  // add expected log-likelihood
-  target += dot_product(pcat, logp);
-}
-  }
+    // log p(Y = k) for all categories
+    for (k in 1:K) {
+        logp[k] = ordered_logistic_lpmf(
+        k |
+        lambda[i] * theta[p, s],
+        lambda[i] * tau[i]
+        );
+    }
+    pcat = softmax(logp); // normalize to probs
+
+    // add expected log-likelihood
+    target += dot_product(pcat, logp);
+} */
 }
 
 generated quantities {
