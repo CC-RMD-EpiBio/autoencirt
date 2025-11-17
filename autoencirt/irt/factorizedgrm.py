@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 
 import jax.numpy as jnp
-from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
 from bayesianquilts.util import training_loop
 from bayesianquilts.vi.advi import build_factored_surrogate_posterior_generator
-from jax.scipy.special import xlogy
 from tensorflow_probability.python import distributions as tfd
 from tensorflow_probability.substrates.jax import bijectors as tfb
 from tensorflow_probability.substrates.jax import distributions as tfd
@@ -190,29 +188,33 @@ class FactorizedGRModel(IRTModel):
 
     def gen_discrim_prior(self, j, indices):
         out = {}
-        model_string = f"""lambda kappa_{j}: tfd.Independent(
-            tfd.HalfNormal(scale=kappa_{j}*tf.ones((1, 1, {len(indices)}, 1))), reinterpreted_batch_ndims=4)"""
-        out[f"discriminations_{j}"] = eval(
-            model_string,
-            {"self": self, "tfd": tfd, "tf": tf, "AbsHorseshoe": AbsHorseshoe},
+        out[f"discriminations_{j}"] = tfd.Independent(
+            tfd.HalfNormal(scale=self.kappa_scale * tf.ones((1, 1, len(indices), 1))), 
+            reinterpreted_batch_ndims=4
         )
-        model_string = f"""lambda kappa_a_{j}: tfd.Independent(
-            SqrtInverseGamma(
-                0.5 * tf.ones((1, 1, 1, 1), dtype=self.dtype),
-                1.0 / kappa_a_{j}),
-            reinterpreted_batch_ndims=4)"""
-        out[f"kappa_{j}"] = eval(
-            model_string,
-            {"self": self, "tfd": tfd, "tf": tf, "SqrtInverseGamma": SqrtInverseGamma},
-        )
-        out[f"kappa_a_{j}"] = tfd.Independent(
-            tfd.InverseGamma(
-                0.5 * tf.ones((1, 1, 1, 1), dtype=self.dtype),
-                tf.ones((1, 1, 1, 1), dtype=self.dtype)
-                / self.kappa_scale**2,
-            ),
-            reinterpreted_batch_ndims=4,
-        )
+        # model_string = f"""lambda kappa_{j}: tfd.Independent(
+        #     tfd.HalfNormal(scale=kappa_{j}*tf.ones((1, 1, {len(indices)}, 1))), reinterpreted_batch_ndims=4)"""
+        # out[f"discriminations_{j}"] = eval(
+        #     model_string,
+        #     {"self": self, "tfd": tfd, "tf": tf, "AbsHorseshoe": AbsHorseshoe},
+        # )
+        # model_string = f"""lambda kappa_a_{j}: tfd.Independent(
+        #     SqrtInverseGamma(
+        #         0.5 * tf.ones((1, 1, 1, 1), dtype=self.dtype),
+        #         1.0 / kappa_a_{j}),
+        #     reinterpreted_batch_ndims=4)"""
+        # out[f"kappa_{j}"] = eval(
+        #     model_string,
+        #     {"self": self, "tfd": tfd, "tf": tf, "SqrtInverseGamma": SqrtInverseGamma},
+        # )
+        # out[f"kappa_a_{j}"] = tfd.Independent(
+        #     tfd.InverseGamma(
+        #         0.5 * tf.ones((1, 1, 1, 1), dtype=self.dtype),
+        #         tf.ones((1, 1, 1, 1), dtype=self.dtype)
+        #         / self.kappa_scale**2,
+        #     ),
+        #     reinterpreted_batch_ndims=4,
+        # )
         return out
     
     def gen_ability_prior(self, j):
@@ -286,12 +288,12 @@ class FactorizedGRModel(IRTModel):
             jnp.abs(discriminations), axis=-3, keepdims=True)
 
         response_probs = jnp.sum(response_probs*discrimination_weights, axis=-3)
-        imputed_lp = jnp.sum(xlogy(response_probs, response_probs), axis=-1)
+        #imputed_lp = jnp.sum(xlogy(response_probs, response_probs), axis=-1)
 
         rv_responses = tfd.Categorical(probs=response_probs)
 
         log_probs = rv_responses.log_prob(choices)
-        log_probs = jnp.where(bad_choices[jnp.newaxis, ...], imputed_lp, log_probs)
+        log_probs = jnp.where(bad_choices[jnp.newaxis, ...], jnp.zeros_like(log_probs), log_probs)
 
         log_probs = jnp.sum(log_probs, axis=-1)
 
