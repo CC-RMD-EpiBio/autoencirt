@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 from os import path, system
 
-import pandas as pd
-import tensorflow as tf
+import grain
+
+# import pandas as pd
 
 if not path.exists('RWAS/data.csv'):
     system("wget https://openpsychometrics.org/_rawdata/RWAS.zip")
@@ -37,6 +38,14 @@ to_reverse = [
     3, 5, 7, 8, 10, 12, 14, 17, 19, 20
 ]
 
+class ArrayDataSource(grain.sources.RandomAccessDataSource):
+    def __init__(self, df):
+        self._data = df.to_dict()
+        self.n = len(df)
+    def __getitem__(self, idx):
+        return {k: v[idx] for k, v in self._data.items()}
+    def __len__(self):
+        return self.n
 
 def get_data(reorient=False, pandas=False):
     """Get RWA dataset
@@ -51,25 +60,17 @@ def get_data(reorient=False, pandas=False):
     if not path.exists('RWAS/data.csv'):
         system("wget https://openpsychometrics.org/_rawdata/RWAS.zip")
         system("unzip RWAS.zip")
-    data = pd.read_csv('RWAS/data.csv', low_memory=False)
+    data = pl.read_csv('RWAS/data.csv', low_memory=False)
     data = data.loc[:, map(lambda x: 'Q'+str(x), list(range(1, 23)))]
     data = data - 1
     num_people = len(data)
     if reorient:
         data.iloc[:, to_reverse] = 8 - data.iloc[:, to_reverse]
         
-    data[data > 8] = -1
+    data[data > 9] = -1
     data['person'] = data.index
     if pandas:
         return data, num_people
 
-    def data_gen():
-        records = data.to_dict('records')
-        for r in records:
-            yield r
-    tfdata = tf.data.Dataset.from_generator(
-        data_gen,
-        output_types={k: tf.float32 for k in data.columns},
-        output_shapes={k: () for k in data.columns}
-    )
-    return tfdata, num_people
+    dataset = grain.MapDataset.source(ArrayDataSource(data))
+    return dataset, num_people

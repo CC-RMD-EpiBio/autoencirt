@@ -1,25 +1,11 @@
 import numpy as np
+import tensorflow_probability.substrates.jax as tfp
+from bayesianquilts.dense import DenseHorseshoe
+from bayesianquilts.util import clip_gradients
+from tensorflow_probability.substrates.jax import distributions as tfd
+from tensorflow_probability.substrates.jax import tf2jax as tf
 
 from autoencirt.irt.grm import GRModel
-from bayesianquilts.dense import DenseHorseshoe
-
-
-import tensorflow as tf
-import tensorflow_probability as tfp
-from tensorflow_probability.python import util as tfp_util
-from tensorflow_probability.python.mcmc.transformed_kernel import (
-    make_transform_fn, make_transformed_log_prob, make_log_det_jacobian_fn)
-
-from tensorflow_probability.python.bijectors import softplus as softplus_lib
-
-from bayesianquilts.util import (
-    clip_gradients
-)
-
-tfd = tfp.distributions
-
-tfd = tfp.distributions
-tfb = tfp.bijectors
 
 
 class AEGRModel(GRModel):
@@ -37,7 +23,7 @@ class AEGRModel(GRModel):
                  num_items=1,
                  ):
         super(AEGRModel, self).__init__(
-            auxiliary_parameterization=True,
+            auxiliary_parameterization=auxiliary_parameterization,
             xi_scale=xi_scale,
             eta_scale=eta_scale,
             kappa_scale=kappa_scale,
