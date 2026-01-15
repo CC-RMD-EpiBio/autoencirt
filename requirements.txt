@@ -21,7 +21,7 @@ aiofiles==24.1.0
     # via orbax-checkpoint
 annotated-types==0.7.0
     # via pydantic
-array-record==0.8.1
+array-record==0.7.2
     # via grain
 arviz==0.22.0
     # via -r requirements.in
@@ -103,7 +103,7 @@ fsspec==2025.9.0
     #   torch
 gast==0.6.0
     # via tensorflow-probability
-grain==0.2.12
+grain==0.2.11
     # via -r requirements.in
 h5netcdf==1.6.4
     # via arviz
@@ -261,7 +261,7 @@ packaging==25.0
     #   scikit-image
     #   transformers
     #   xarray
-pandas==2.3.2
+pandas==2.2.2
     # via
     #   -r requirements.in
     #   arviz

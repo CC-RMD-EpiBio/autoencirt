@@ -89,6 +89,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+env-311/
 
 # Spyder project settings
 .spyderproject
@@ -113,3 +114,6 @@ sandbox/
 .DS_Store
 *.tf_ckpts*
 
+
+.vscode/
+env

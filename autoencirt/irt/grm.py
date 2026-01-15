@@ -2,7 +2,6 @@
 
 import jax.numpy as jnp
 import numpy as np
-import tensorflow_probability.substrates.jax as tfp
 from bayesianquilts.distributions import AbsHorseshoe, SqrtInverseGamma
 from bayesianquilts.vi.advi import build_factored_surrogate_posterior_generator
 from jax.scipy.special import xlogy
@@ -107,7 +106,7 @@ class GRModel(IRTModel):
         people = data[self.person_key].astype(jnp.int32)
         choices = jnp.concat([data[i][:, jnp.newaxis] for i in self.item_keys], axis=-1)
 
-        bad_choices = choices < 0
+        bad_choices = (choices < 0) | (choices >= self.response_cardinality) | jnp.isnan(choices)
 
         choices = jnp.where(bad_choices, jnp.zeros_like(choices), choices)
 
@@ -117,12 +116,17 @@ class GRModel(IRTModel):
         abilities = abilities[:, people, ...]
 
         response_probs = self.grm_model_prob(abilities, discriminations, difficulties)
+        discrimination_weights = jnp.abs(discriminations) / jnp.sum(
+            jnp.abs(discriminations), axis=-3, keepdims=True)
+
+        response_probs = jnp.sum(response_probs*discrimination_weights, axis=-3)
+        imputed_lp = jnp.sum(xlogy(response_probs, response_probs), axis=-1)
 
         rv_responses = tfd.Categorical(probs=response_probs)
 
         log_probs = rv_responses.log_prob(choices)
         log_probs = jnp.where(
-            bad_choices[jnp.newaxis, ...], jnp.zeros_like(log_probs), log_probs
+            bad_choices[jnp.newaxis, ...], imputed_lp, log_probs
         )
 
         log_probs = jnp.sum(log_probs, axis=-1)
@@ -425,14 +429,7 @@ class GRModel(IRTModel):
                 ),
                 reinterpreted_batch_ndims=4,
             )
-        discriminations0 = (
-            tfp.math.softplus_inverse(jnp.cast(self.discrimination_guess, self.dtype))
-            if self.discrimination_guess is not None
-            else (
-                -2.0
-                * jnp.ones((1, self.dimensions, self.num_items, 1), dtype=self.dtype)
-            )
-        )
+
 
         self.joint_prior_distribution = tfd.JointDistributionNamed(
             grm_joint_distribution_dict
@@ -455,8 +452,8 @@ class GRModel(IRTModel):
         """
         sampling_rv = tfd.Independent(
             tfd.Normal(
-                loc=jnp.reduce_mean(self.calibrated_expectations["abilities"], axis=0),
-                scale=jnp.math.reduce_std(
+                loc=jnp.mean(self.calibrated_expectations["abilities"], axis=0),
+                scale=jnp.std(
                     self.calibrated_expectations["abilities"], axis=0
                 ),
             ),
@@ -473,7 +470,7 @@ class GRModel(IRTModel):
             ddifficulties=jnp.expand_dims(self.surrogate_sample["ddifficulties"], 0),
         )
 
-        response_probs = jnp.reduce_mean(response_probs, axis=-4)
+        response_probs = jnp.mean(response_probs, axis=-4)
 
         response_rv = tfd.Independent(
             tfd.Categorical(probs=response_probs), reinterpreted_batch_ndims=1
@@ -483,12 +480,34 @@ class GRModel(IRTModel):
         # l_w = l_w - jnp.reduce_max(l_w, axis=0, keepdims=True)
         w = jnp.math.exp(l_w) / jnp.sum(jnp.math.exp(l_w), axis=0, keepdims=True)
         mean = jnp.sum(w * trait_samples[:, jnp.newaxis, :, 0, 0], axis=0)
-        mean2 = jnp.math.reduce_sum(
+        mean2 = jnp.sum(
             w * trait_samples[:, jnp.newaxis, :, 0, 0] ** 2, axis=0
         )
         std = jnp.sqrt(mean2 - mean**2)
         return mean, std, w, trait_samples
-
+    
+    def fit_dim(self, *args, dim: int,  **kwargs):
+        if dim >= self.dimensions:
+            raise ValueError("Dimension to fit must be less than model dimensions")
+        # Only optimize parameters for the selected dimension `dim`
+        optimizing_keys = [
+            k
+            for k in self.params.keys()
+            if (
+            not any(
+                k.startswith(prefix)
+                and not k.startswith(f"{prefix}{dim}")
+                for prefix in [
+                "discriminations_",
+                "ddifficulties_",
+                "difficulties0_",
+                "kappa_",
+                "kappa_a_",
+                ]
+            )
+            )
+        ]
+        return self.fit(*args, **kwargs, optimize_keys=optimizing_keys)
     def unormalized_log_prob(self, data, prior_weight=1., **params):
         log_prior = self.joint_prior_distribution.log_prob(params)
         prediction = self.predictive_distribution(data, **params)
@@ -503,7 +522,7 @@ class GRModel(IRTModel):
             log_likelihood,
             jnp.zeros_like(log_likelihood),
         )
-        min_val = jnp.reduce_min(finite_portion) - 1.0
+        min_val = jnp.min(finite_portion) - 1.0
         log_likelihood = jnp.where(
             jnp.isfinite(log_likelihood),
             log_likelihood,

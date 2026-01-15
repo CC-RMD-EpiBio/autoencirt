@@ -2,7 +2,8 @@
 from os import path, system
 
 import grain
-import pandas as pd
+
+# import pandas as pd
 
 if not path.exists('RWAS/data.csv'):
     system("wget https://openpsychometrics.org/_rawdata/RWAS.zip")
@@ -59,7 +60,7 @@ def get_data(reorient=False, pandas=False):
     if not path.exists('RWAS/data.csv'):
         system("wget https://openpsychometrics.org/_rawdata/RWAS.zip")
         system("unzip RWAS.zip")
-    data = pd.read_csv('RWAS/data.csv', low_memory=False)
+    data = pl.read_csv('RWAS/data.csv', low_memory=False)
     data = data.loc[:, map(lambda x: 'Q'+str(x), list(range(1, 23)))]
     data = data - 1
     num_people = len(data)

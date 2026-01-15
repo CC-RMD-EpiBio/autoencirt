@@ -20,12 +20,6 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=[
-        'dill>=0.3.1.1',
-        'matplotlib>=3.1',
-        'factor-analyzer',
-        'bayesianquilts@git+https://github.com/mederrata/bayesianquilts.git'
-    ],
     python_requires='>=3.11',
     scripts=[
         'autoencirt/scripts/rwas_test.py',
