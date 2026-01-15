@@ -9,6 +9,7 @@ from tensorflow_probability.substrates.jax import distributions as tfd
 from tensorflow_probability.substrates.jax import tf2jax as tf
 
 from autoencirt.irt import IRTModel
+from flax import nnx
 
 
 class FactorizedGRModel(IRTModel):
@@ -68,9 +69,11 @@ class FactorizedGRModel(IRTModel):
 
 
 
-        self.joint_prior_distribution = tfd.JointDistributionNamed(
+
+
+        self.joint_prior_distribution = nnx.data(tfd.JointDistributionNamed(
             grm_joint_distribution_dict
-        )
+        ))
         self.surrogate_distribution_generator, self.surrogate_parameter_initializer = (
             build_factored_surrogate_posterior_generator(
                 self.joint_prior_distribution,

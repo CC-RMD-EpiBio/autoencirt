@@ -5,6 +5,8 @@ from tensorflow_probability.substrates.jax import distributions as tfd
 from tensorflow_probability.substrates.jax import tf2jax as tf
 
 
+from flax import nnx
+
 class IRTModel(BayesianModel):
 
     def __init__(
@@ -26,9 +28,11 @@ class IRTModel(BayesianModel):
             discrimination_guess=None,
             include_independent=False,
             vi_mode='advi',
-            dtype=tf.float64):
+            dtype=tf.float64,
+            **kwargs):
         super(IRTModel, self).__init__(
-            data
+            data=data,
+            **kwargs
         )
 
         self.dtype = dtype
@@ -39,7 +43,8 @@ class IRTModel(BayesianModel):
         self.person_key = person_key
         self.positive_discriminations = positive_discriminations
         self.eta_scale = eta_scale
-        self.kappa_scale = kappa_scale
+        # self.kappa_scale = kappa_scale # Will be set in set_dimension or needs wrapping
+        self.kappa_scale_base = kappa_scale # Store base value
         self.weight_exponent = weight_exponent
         self.response_cardinality = response_cardinality
         self.num_people = num_people
@@ -49,15 +54,21 @@ class IRTModel(BayesianModel):
         self.vi_mode = vi_mode
         self.num_groups = num_groups
         self.dtype = dtype
-        # self.create_distributions()
         self.set_dimension(dim, decay)
   
     def set_dimension(self, dim, decay=0.25):
         self.dimensions = dim
         self.dimensional_decay = decay
-        self.kappa_scale *= (decay**tf.cast(
+        # Calculate kappa_scale derived value
+        val = self.kappa_scale_base * (decay**tf.cast(
             tf.range(dim), self.dtype)
         )[tf.newaxis, :, tf.newaxis, tf.newaxis]
+        # Assign as nnx.Variable or just regular attribute if it doesn't conflict?
+        # The error said "static attribute". If I assign a JAX array to an attribute of an nnx.Module, 
+        # it expects it to be a Variable/Param/Data if it's not static.
+        # Since this is a derived constant (hyperparameter), nnx.Param(..., trainable=False) or nnx.Variable?
+        # Or just nnx.data if it's not a leaf?
+        self.kappa_scale = nnx.Param(val, trainable=False) # Treat as non-trainable parameter
 
     def set_params_from_samples(self, samples):
         """_summary_

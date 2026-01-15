@@ -9,6 +9,7 @@ from tensorflow_probability.substrates.jax import bijectors as tfb
 from tensorflow_probability.substrates.jax import distributions as tfd
 
 from autoencirt.irt import IRTModel
+from flax import nnx
 
 
 def make_shifted_softplus(min_value, hinge_softness=1.0, name="shifted_softplus"):
@@ -431,9 +432,11 @@ class GRModel(IRTModel):
             )
 
 
-        self.joint_prior_distribution = tfd.JointDistributionNamed(
+
+
+        self.joint_prior_distribution = nnx.data(tfd.JointDistributionNamed(
             grm_joint_distribution_dict
-        )
+        ))
 
         self.surrogate_distribution_generator, self.surrogate_parameter_initializer = (
             build_factored_surrogate_posterior_generator(self.joint_prior_distribution)
