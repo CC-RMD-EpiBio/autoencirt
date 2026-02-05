@@ -322,7 +322,7 @@ pluggy==1.6.0
     # via docling
 polyfactory==2.22.2
     # via docling
-protobuf==6.32.0
+protobuf==6.33.5
     # via
     #   grain
     #   orbax-checkpoint
